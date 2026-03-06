@@ -1,12 +1,45 @@
 # ESM3 Agent
 
-蛋白质AI助手，OpenAI API兼容
+蛋白质AI助手，OpenAI API兼容。
+
+## 给零基础用户的最简用法（推荐）
+
+目标：让不会编程的人也能直接用。
+
+### 第一步：只改 1 个配置文件
+
+编辑 `config.yaml`（或你自己的环境变量文件），至少确认以下字段：
+
+- `PORT`：服务端口（默认 `:8080`）
+- `PYTHON_PATH`：ESM3 的 Python 解释器
+- `SCRIPT_DIR`：ESM3 项目目录
+- `DB_PATH`：默认序列数据库路径（SQLite）
+
+### 第二步：启动服务
+
+```bash
+./start.sh
+./status.sh
+```
+
+### 第三步：在聊天里“说人话”
+
+你可以通过 OpenAI 兼容接口发送自然语言：
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"esm3-agent-v1",
+    "messages":[{"role":"user","content":"帮我检查一下运行环境"}]
+  }'
+```
+
+---
 
 ## 上游LLM（真实 Function Calling）
 
-Agent 现在支持调用 OpenAI 兼容接口进行真实工具选择（function calling）。
-
-可配置环境变量：
+Agent 支持调用 OpenAI 兼容接口进行真实工具选择（function calling）。
 
 ```bash
 export UPSTREAM_API="https://api.openai.com/v1/chat/completions"
@@ -16,8 +49,9 @@ export UPSTREAM_MODEL="gpt-4o-mini"
 
 如果 `UPSTREAM_KEY` 为空，会自动回退到本地关键词匹配逻辑。
 
+---
 
-## 详细使用说明（从 0 到 1）
+## 详细使用说明（包含文件/数据库分析 + 约束生成）
 
 ### 1) 配置环境变量
 
@@ -29,58 +63,75 @@ export UPSTREAM_MODEL="gpt-4o-mini"
 # ESM3 本地执行环境
 export PYTHON_PATH="/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python"
 export SCRIPT_DIR="/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"
+
+# 可选：默认数据库
+export DB_PATH="./data/sequences.db"
 ```
 
-> 不设置 `UPSTREAM_KEY` 时，服务会自动回退为本地规则匹配。
-
-### 2) 启动服务
+### 2) 启动与健康检查
 
 ```bash
 ./start.sh
-./status.sh
-```
-
-正常时应能看到 `8080` 端口监听，且健康检查返回 `OK`。
-
-### 3) 基础连通性检查
-
-```bash
 curl http://localhost:8080/health
 ```
 
-### 4) 通过 OpenAI 兼容接口调用 Agent
+### 3) 序列分析（3 种来源）
 
-#### 4.1 环境检查
+#### 3.1 直接输入序列
+
 ```bash
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"esm3-agent-v1",
-    "messages":[{"role":"user","content":"请检查esm3运行环境"}]
+    "messages":[{"role":"user","content":"分析序列 MKTVRQERLKDLLEK"}]
   }'
 ```
 
-#### 4.2 序列分析（会调用 `analyze_sequence`）
+#### 3.2 从文件分析（FASTA / 纯文本）
+
 ```bash
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"esm3-agent-v1",
-    "messages":[{"role":"user","content":"帮我分析这个蛋白序列 MKTVRQERLKDLLEK"}]
+    "messages":[{"role":"user","content":"请分析文件 /data/sample.fasta 中的蛋白序列"}]
   }'
 ```
 
-#### 4.3 蛋白生成（会调用 `generate_protein`）
+#### 3.3 从数据库分析（SQLite）
+
 ```bash
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"esm3-agent-v1",
-    "messages":[{"role":"user","content":"请帮我生成一个GFP蛋白"}]
+    "messages":[{"role":"user","content":"从数据库读取并分析，db_path=/data/sequences.db, query=SELECT sequence FROM sequences LIMIT 1"}]
   }'
 ```
 
-### 5) 查看日志和排错
+### 4) 蛋白生成（可加约束条件）
+
+支持示例约束：
+- 长度范围（`min_length`, `max_length`）
+- 必须包含 motif（`must_include`）
+- 禁用氨基酸（`forbidden_aas`）
+- 温度（`temperature`）
+
+自然语言示例：
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"esm3-agent-v1",
+    "messages":[{"role":"user","content":"生成一个蛋白，长度180-220，必须包含GSG，不能出现C，温度0.7"}]
+  }'
+```
+
+> 说明：生成工具本身耗时较长（通常 2-5 分钟）。
+
+### 5) 日志和排错
 
 ```bash
 # 服务日志
@@ -91,41 +142,17 @@ tail -f logs/usage.log
 ```
 
 常见问题：
-- `tool_args parse failed`：通常是上游模型返回了非 JSON 参数，可换更稳定模型或收紧 prompt。
-- `工具执行错误`：一般是本地 Python/ESM3 环境或路径配置问题。
-- 生成很慢：`generate_protein` 本身耗时长（2-5 分钟）属正常。
+- `tool_args parse failed`：上游模型返回了非 JSON 参数。
+- `工具执行错误`：通常是本地 Python/ESM3 环境、文件路径或数据库路径问题。
+- 生成很慢：`generate_protein` 正常现象。
 
-## 快速开始
+---
+
+## 快速命令
+
 ```bash
-# 启动
 ./start.sh
-
-# 停止
 ./stop.sh
-
-# 重启
 ./restart.sh
-
-# 状态
 ./status.sh
-```
-
-## 测试
-```bash
-# 健康检查
-curl http://localhost:8080/health
-
-# 环境检查
-curl http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"esm3-agent-v1","messages":[{"role":"user","content":"检查环境"}]}'
-```
-
-## 日志
-```bash
-# 实时查看
-tail -f logs/esm3-agent.log
-
-# 查看最新
-tail -100 logs/esm3-agent.log
 ```
