@@ -27,6 +27,7 @@ type Config struct {
 	Timeout       time.Duration
 	UpstreamAPI   string // 上游LLM API（用于意图理解）
 	UpstreamKey   string
+	UpstreamModel string
 	EnableLogging bool
 }
 
@@ -36,8 +37,9 @@ func NewConfig() *Config {
 		ScriptDir:     getEnv("SCRIPT_DIR", "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"),
 		Port:          getEnv("PORT", ":8080"),
 		Timeout:       5 * time.Minute,
-		UpstreamAPI:   getEnv("UPSTREAM_API", "https://api.anthropic.com/v1/messages"),
+		UpstreamAPI:   getEnv("UPSTREAM_API", "https://api.openai.com/v1/chat/completions"),
 		UpstreamKey:   getEnv("UPSTREAM_KEY", ""),
+		UpstreamModel: getEnv("UPSTREAM_MODEL", "gpt-4o-mini"),
 		EnableLogging: true,
 	}
 }
@@ -68,14 +70,14 @@ func (l *UsageLogger) Log(userMsg, agentResp string, tool string, duration time.
 		tool,
 		duration.Seconds(),
 		truncate(agentResp, 100))
-	
+
 	f, err := os.OpenFile(l.logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("❌ 写入使用日志失败: %v", err)
 		return
 	}
 	defer f.Close()
-	
+
 	f.WriteString(entry)
 }
 
@@ -131,19 +133,19 @@ func NewESM3Client(config *Config) *ESM3Client {
 func (c *ESM3Client) runPython(script string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
 	defer cancel()
-	
+
 	cmd := exec.CommandContext(ctx, c.config.PythonPath, "-c", script)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
-	
+
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("timeout after %v", c.config.Timeout)
 		}
 		return "", fmt.Errorf("%v", stderr.String())
 	}
-	
+
 	return strings.TrimSpace(out.String()), nil
 }
 
@@ -219,10 +221,17 @@ except Exception as e:
 type LLMClient struct {
 	apiURL string
 	apiKey string
+	model  string
+	http   *http.Client
 }
 
-func NewLLMClient(apiURL, apiKey string) *LLMClient {
-	return &LLMClient{apiURL: apiURL, apiKey: apiKey}
+func NewLLMClient(apiURL, apiKey, model string) *LLMClient {
+	return &LLMClient{
+		apiURL: apiURL,
+		apiKey: apiKey,
+		model:  model,
+		http:   &http.Client{Timeout: 30 * time.Second},
+	}
 }
 
 func (l *LLMClient) CallWithTools(userMessage string, tools []map[string]interface{}) (string, map[string]interface{}, error) {
@@ -230,30 +239,136 @@ func (l *LLMClient) CallWithTools(userMessage string, tools []map[string]interfa
 	if l.apiKey == "" {
 		return l.simpleMatch(userMessage)
 	}
-	
-	// TODO: 实现真正的Function Calling
-	// 这里需要调用Claude/GPT的Function Calling API
-	return l.simpleMatch(userMessage)
+
+	toolName, toolInput, err := l.callOpenAICompatible(userMessage, tools)
+	if err != nil {
+		log.Printf("⚠️ LLM Function Calling失败，回退到规则匹配: %v", err)
+		return l.simpleMatch(userMessage)
+	}
+
+	if toolName == "" {
+		return "chat", nil, nil
+	}
+
+	return toolName, toolInput, nil
+}
+
+func (l *LLMClient) callOpenAICompatible(userMessage string, tools []map[string]interface{}) (string, map[string]interface{}, error) {
+	type openAITool struct {
+		Type     string                 `json:"type"`
+		Function map[string]interface{} `json:"function"`
+	}
+
+	type openAIMessage struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+
+	reqBody := map[string]interface{}{
+		"model": l.model,
+		"messages": []openAIMessage{
+			{Role: "system", Content: `你是一个ESM3工具调度器。请在可用工具中选择最合适的一个：
+- check_environment: 用户要检查环境/依赖时使用
+- analyze_sequence: 用户提供蛋白序列并希望分析时使用
+- generate_protein: 用户希望生成蛋白时使用
+如果无法匹配，直接回复普通文本，不要编造工具参数。`},
+			{Role: "user", Content: userMessage},
+		},
+		"temperature": 0,
+	}
+
+	if len(tools) > 0 {
+		convertedTools := make([]openAITool, 0, len(tools))
+		for _, tool := range tools {
+			convertedTools = append(convertedTools, openAITool{Type: "function", Function: tool})
+		}
+		reqBody["tools"] = convertedTools
+		reqBody["tool_choice"] = "auto"
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, l.apiURL, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return "", nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+l.apiKey)
+
+	resp, err := l.http.Do(req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", nil, fmt.Errorf("llm api status=%d body=%s", resp.StatusCode, truncate(string(body), 200))
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", nil, fmt.Errorf("parse llm response failed: %w", err)
+	}
+
+	if len(parsed.Choices) == 0 {
+		return "", nil, fmt.Errorf("empty llm choices")
+	}
+
+	if len(parsed.Choices[0].Message.ToolCalls) == 0 {
+		return "", nil, nil
+	}
+
+	call := parsed.Choices[0].Message.ToolCalls[0]
+	if call.Function.Name == "" {
+		return "", nil, fmt.Errorf("tool call name is empty")
+	}
+
+	input := map[string]interface{}{}
+	if strings.TrimSpace(call.Function.Arguments) != "" {
+		if err := json.Unmarshal([]byte(call.Function.Arguments), &input); err != nil {
+			return "", nil, fmt.Errorf("parse tool args failed: %w", err)
+		}
+	}
+
+	return call.Function.Name, input, nil
 }
 
 func (l *LLMClient) simpleMatch(msg string) (string, map[string]interface{}, error) {
 	msg = strings.ToLower(msg)
-	
+
 	if strings.Contains(msg, "check") || strings.Contains(msg, "检查") || strings.Contains(msg, "环境") {
 		return "check_environment", nil, nil
 	}
-	
+
 	if strings.Contains(msg, "generate") || strings.Contains(msg, "生成") {
 		return "generate_protein", nil, nil
 	}
-	
+
 	if strings.Contains(msg, "analyze") || strings.Contains(msg, "分析") {
 		sequence := extractSequence(msg)
 		if sequence != "" {
 			return "analyze_sequence", map[string]interface{}{"sequence": sequence}, nil
 		}
 	}
-	
+
 	return "chat", nil, nil
 }
 
@@ -270,45 +385,50 @@ type ESM3Agent struct {
 func NewESM3Agent(config *Config) *ESM3Agent {
 	return &ESM3Agent{
 		esm3Client:  NewESM3Client(config),
-		llmClient:   NewLLMClient(config.UpstreamAPI, config.UpstreamKey),
+		llmClient:   NewLLMClient(config.UpstreamAPI, config.UpstreamKey, config.UpstreamModel),
 		usageLogger: NewUsageLogger("logs/usage.log"),
 	}
 }
 
 func (a *ESM3Agent) HandleRequest(userMessage string) (string, error) {
 	start := time.Now()
-	
+
 	// 步骤1: 使用LLM理解意图，决定调用哪个工具
 	toolName, toolInput, err := a.llmClient.CallWithTools(userMessage, ESM3Tools)
 	if err != nil {
 		return "", err
 	}
-	
+
 	log.Printf("🤖 Agent决策: tool=%s, input=%v", toolName, toolInput)
-	
+
 	// 步骤2: 执行工具
 	var response string
 	switch toolName {
 	case "check_environment":
 		response, err = a.esm3Client.CheckEnvironment()
 	case "analyze_sequence":
+		if toolInput == nil {
+			toolInput = map[string]interface{}{}
+		}
 		if seq, ok := toolInput["sequence"].(string); ok {
 			response, err = a.esm3Client.AnalyzeSequence(seq)
+		} else {
+			response = "请提供蛋白序列，例如：分析序列 MKTVRQ..."
 		}
 	case "generate_protein":
 		response, err = a.esm3Client.GenerateProtein()
 	default:
 		response = a.getHelp()
 	}
-	
+
 	if err != nil {
 		response = fmt.Sprintf("工具执行错误: %v", err)
 	}
-	
+
 	// 记录使用日志
 	duration := time.Since(start)
 	a.usageLogger.Log(userMessage, response, toolName, duration)
-	
+
 	return response, nil
 }
 
@@ -343,15 +463,15 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-	
+
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	
+
 	body, _ := io.ReadAll(r.Body)
 	defer r.Body.Close()
-	
+
 	var req struct {
 		Messages []struct {
 			Role    string `json:"role"`
@@ -359,7 +479,7 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 		} `json:"messages"`
 	}
 	json.Unmarshal(body, &req)
-	
+
 	var userMessage string
 	for i := len(req.Messages) - 1; i >= 0; i-- {
 		if req.Messages[i].Role == "user" {
@@ -367,16 +487,16 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	
+
 	log.Printf("📨 收到请求: %s", truncate(userMessage, 50))
-	
+
 	response, err := s.agent.HandleRequest(userMessage)
 	if err != nil {
 		response = fmt.Sprintf("错误: %v", err)
 	}
-	
+
 	log.Printf("📤 返回响应: %s", truncate(response, 50))
-	
+
 	result := map[string]interface{}{
 		"id":      fmt.Sprintf("esm3-%d", time.Now().Unix()),
 		"object":  "chat.completion",
@@ -393,7 +513,7 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
@@ -416,14 +536,14 @@ func (s *Server) Start() error {
 	http.HandleFunc("/v1/chat/completions", s.chatHandler)
 	http.HandleFunc("/v1/models", s.modelsHandler)
 	http.HandleFunc("/health", s.healthHandler)
-	
+
 	log.Printf("\n%s", strings.Repeat("=", 60))
 	log.Printf("🚀 ESM3 Agent Server v2 (Enhanced)")
 	log.Printf("%s", strings.Repeat("=", 60))
 	log.Printf("📡 API: http://localhost%s/v1/chat/completions", s.config.Port)
 	log.Printf("📊 使用日志: logs/usage.log")
 	log.Printf("%s\n", strings.Repeat("=", 60))
-	
+
 	return http.ListenAndServe(s.config.Port, nil)
 }
 
@@ -463,15 +583,15 @@ func isProteinSeq(s string) bool {
 
 func main() {
 	config := NewConfig()
-	
+
 	log.Println("🔬 检查ESM3环境...")
 	client := NewESM3Client(config)
 	if env, err := client.CheckEnvironment(); err == nil {
 		log.Println(env)
 	}
-	
+
 	server := NewServer(config)
-	
+
 	go func() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
@@ -479,7 +599,7 @@ func main() {
 		log.Println("\n🛑 关闭服务...")
 		os.Exit(0)
 	}()
-	
+
 	if err := server.Start(); err != nil {
 		log.Fatal(err)
 	}

@@ -2,6 +2,20 @@
 
 蛋白质AI助手，OpenAI API兼容
 
+## 上游LLM（真实 Function Calling）
+
+Agent 现在支持调用 OpenAI 兼容接口进行真实工具选择（function calling）。
+
+可配置环境变量：
+
+```bash
+export UPSTREAM_API="https://api.openai.com/v1/chat/completions"
+export UPSTREAM_KEY="<your_api_key>"
+export UPSTREAM_MODEL="gpt-4o-mini"
+```
+
+如果 `UPSTREAM_KEY` 为空，会自动回退到本地关键词匹配逻辑。
+
 ## 快速开始
 ```bash
 # 启动
