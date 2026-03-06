@@ -24,6 +24,7 @@ type Config struct {
 	PythonPath    string
 	ScriptDir     string
 	Port          string
+	DBPath        string
 	Timeout       time.Duration
 	UpstreamAPI   string // 上游LLM API（用于意图理解）
 	UpstreamKey   string
@@ -36,6 +37,7 @@ func NewConfig() *Config {
 		PythonPath:    getEnv("PYTHON_PATH", "/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python"),
 		ScriptDir:     getEnv("SCRIPT_DIR", "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"),
 		Port:          getEnv("PORT", ":8080"),
+		DBPath:        getEnv("DB_PATH", "./data/sequences.db"),
 		Timeout:       5 * time.Minute,
 		UpstreamAPI:   getEnv("UPSTREAM_API", "https://api.openai.com/v1/chat/completions"),
 		UpstreamKey:   getEnv("UPSTREAM_KEY", ""),
@@ -96,24 +98,46 @@ var ESM3Tools = []map[string]interface{}{
 	},
 	{
 		"name":        "analyze_sequence",
-		"description": "分析蛋白质序列的基本特性，包括长度、氨基酸组成、疏水性、电荷等",
+		"description": "分析蛋白质序列，可直接传序列，也可从文件或SQLite数据库读取",
 		"parameters": map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"sequence": map[string]string{
 					"type":        "string",
-					"description": "要分析的蛋白质序列（一字母代码）",
+					"description": "要分析的蛋白质序列（一字母代码，直接输入模式）",
+				},
+				"source": map[string]string{
+					"type":        "string",
+					"description": "序列来源: direct(默认), file, database",
+				},
+				"file_path": map[string]string{
+					"type":        "string",
+					"description": "当source=file时，填写本地文件路径，支持FASTA或纯文本",
+				},
+				"db_path": map[string]string{
+					"type":        "string",
+					"description": "当source=database时，SQLite文件路径，不填则使用默认DB_PATH",
+				},
+				"query": map[string]string{
+					"type":        "string",
+					"description": "当source=database时，SQL查询语句（需返回至少1列序列）",
 				},
 			},
-			"required": []string{"sequence"},
+			"required": []string{},
 		},
 	},
 	{
 		"name":        "generate_protein",
-		"description": "使用ESM3模型生成新的GFP蛋白质序列（需要2-5分钟）",
+		"description": "使用ESM3模型生成新的GFP蛋白质序列（支持长度、motif、禁用氨基酸等约束）",
 		"parameters": map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
+			"type": "object",
+			"properties": map[string]interface{}{
+				"min_length":    map[string]string{"type": "integer", "description": "最小长度"},
+				"max_length":    map[string]string{"type": "integer", "description": "最大长度"},
+				"must_include":  map[string]string{"type": "string", "description": "必须包含的短motif，如GSG"},
+				"forbidden_aas": map[string]string{"type": "string", "description": "禁止出现的氨基酸字母集合，如CM"},
+				"temperature":   map[string]string{"type": "number", "description": "采样温度，默认0.7"},
+			},
 		},
 	},
 }
@@ -198,7 +222,89 @@ if aa_counts:
 	return c.runPython(script)
 }
 
-func (c *ESM3Client) GenerateProtein() (string, error) {
+func extractSequenceFromFile(filePath string) (string, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var b strings.Builder
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, ">") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		for _, ch := range line {
+			if ch >= 'a' && ch <= 'z' {
+				ch = ch - 'a' + 'A'
+			}
+			if strings.ContainsRune("ACDEFGHIKLMNPQRSTVWY", ch) {
+				b.WriteRune(ch)
+			}
+		}
+	}
+
+	seq := b.String()
+	if seq == "" {
+		return "", fmt.Errorf("未在文件中解析到蛋白序列")
+	}
+	return seq, nil
+}
+
+func (c *ESM3Client) AnalyzeSequenceFromSource(source, sequence, filePath, dbPath, query string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", "direct":
+		return c.AnalyzeSequence(sequence)
+	case "file":
+		seq, err := extractSequenceFromFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("读取文件失败: %w", err)
+		}
+		return c.AnalyzeSequence(seq)
+	case "database":
+		if strings.TrimSpace(dbPath) == "" {
+			dbPath = c.config.DBPath
+		}
+		if strings.TrimSpace(query) == "" {
+			query = "SELECT sequence FROM sequences LIMIT 1"
+		}
+		script := fmt.Sprintf(`
+import sqlite3
+db_path = %q
+query = %q
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+cur.execute(query)
+row = cur.fetchone()
+conn.close()
+if not row:
+    raise RuntimeError("query returned empty result")
+print(str(row[0]).strip())
+`, dbPath, query)
+		seq, err := c.runPython(script)
+		if err != nil {
+			return "", fmt.Errorf("数据库读取失败: %w", err)
+		}
+		return c.AnalyzeSequence(seq)
+	default:
+		return "", fmt.Errorf("不支持的source: %s（可选 direct/file/database）", source)
+	}
+}
+
+func (c *ESM3Client) GenerateProtein(minLength, maxLength int, mustInclude, forbiddenAAs string, temperature float64) (string, error) {
+	if temperature <= 0 {
+		temperature = 0.7
+	}
+	if minLength < 0 {
+		minLength = 0
+	}
+	if maxLength < 0 {
+		maxLength = 0
+	}
+	mustInclude = strings.ToUpper(strings.TrimSpace(mustInclude))
+	forbiddenAAs = strings.ToUpper(strings.TrimSpace(forbiddenAAs))
+
 	script := fmt.Sprintf(`
 import sys
 sys.path.insert(0, '%s')
@@ -209,13 +315,23 @@ try:
         prompt = pickle.load(f)
     print("开始生成...")
     generator = ESM3Generator()
-    result = generator.chain_of_thought_generation(
-        prompt, structure_steps=200, sequence_steps=150, temperature=0.7
-    )
-    print(f"生成成功! 序列: {result.sequence[:60]}... 长度: {len(result.sequence)}")
+    result = generator.chain_of_thought_generation(prompt, structure_steps=200, sequence_steps=150, temperature=%f)
+    seq = str(result.sequence)
+    if %d > 0 and len(seq) < %d:
+        raise RuntimeError(f"长度不满足最小要求: {len(seq)} < %d")
+    if %d > 0 and len(seq) > %d:
+        raise RuntimeError(f"长度超过最大要求: {len(seq)} > %d")
+    motif = %q
+    if motif and motif not in seq:
+        raise RuntimeError(f"序列未包含指定motif: {motif}")
+    forbidden = set(%q)
+    bad = sorted(set([aa for aa in seq if aa in forbidden]))
+    if bad:
+        raise RuntimeError(f"序列包含禁用氨基酸: {''.join(bad)}")
+    print(f"生成成功! 序列: {seq[:60]}... 长度: {len(seq)}")
 except Exception as e:
     print(f"错误: {e}")
-`, c.config.ScriptDir, c.config.ScriptDir)
+`, c.config.ScriptDir, c.config.ScriptDir, temperature, minLength, minLength, minLength, maxLength, maxLength, maxLength, mustInclude, forbiddenAAs)
 	return c.runPython(script)
 }
 
@@ -295,8 +411,8 @@ func (l *LLMClient) callOpenAICompatible(userMessage string, tools []map[string]
 		"messages": []openAIMessage{
 			{Role: "system", Content: `你是一个ESM3工具调度器。请在可用工具中选择最合适的一个：
 - check_environment: 用户要检查环境/依赖时使用
-- analyze_sequence: 用户提供蛋白序列并希望分析时使用
-- generate_protein: 用户希望生成蛋白时使用
+- analyze_sequence: 支持参数 source( direct/file/database )，可配 sequence/file_path/db_path/query
+- generate_protein: 支持可选参数 min_length/max_length/must_include/forbidden_aas/temperature
 如果无法匹配，直接回复普通文本，不要编造工具参数。`},
 			{Role: "user", Content: userMessage},
 		},
@@ -388,13 +504,25 @@ func (l *LLMClient) simpleMatch(msg string) (string, map[string]interface{}, err
 	}
 
 	if strings.Contains(msg, "generate") || strings.Contains(msg, "生成") {
-		return "generate_protein", nil, nil
+		params := map[string]interface{}{}
+		if strings.Contains(msg, "不能") || strings.Contains(msg, "禁用") {
+			if strings.Contains(msg, "c") {
+				params["forbidden_aas"] = "C"
+			}
+		}
+		return "generate_protein", params, nil
 	}
 
 	if strings.Contains(msg, "analyze") || strings.Contains(msg, "分析") {
 		sequence := extractSequence(msg)
 		if sequence != "" {
-			return "analyze_sequence", map[string]interface{}{"sequence": sequence}, nil
+			return "analyze_sequence", map[string]interface{}{"source": "direct", "sequence": sequence}, nil
+		}
+		if strings.Contains(msg, "文件") || strings.Contains(msg, "file") {
+			return "analyze_sequence", map[string]interface{}{"source": "file", "file_path": extractLikelyPath(msg)}, nil
+		}
+		if strings.Contains(msg, "数据库") || strings.Contains(msg, "sqlite") || strings.Contains(msg, "db") {
+			return "analyze_sequence", map[string]interface{}{"source": "database"}, nil
 		}
 	}
 
@@ -439,13 +567,30 @@ func (a *ESM3Agent) HandleRequest(userMessage string) (string, error) {
 		if toolInput == nil {
 			toolInput = map[string]interface{}{}
 		}
-		if seq, ok := toolInput["sequence"].(string); ok {
-			response, err = a.esm3Client.AnalyzeSequence(seq)
-		} else {
-			response = "请提供蛋白序列，例如：分析序列 MKTVRQ..."
+		source, _ := toolInput["source"].(string)
+		seq, _ := toolInput["sequence"].(string)
+		filePath, _ := toolInput["file_path"].(string)
+		dbPath, _ := toolInput["db_path"].(string)
+		query, _ := toolInput["query"].(string)
+		if strings.TrimSpace(source) == "" && strings.TrimSpace(seq) == "" {
+			response = "请提供参数：\n1) 直接序列：source=direct, sequence=...\n2) 文件：source=file, file_path=/path/to.fasta\n3) 数据库：source=database, db_path=/path/to.db, query='SELECT sequence FROM sequences LIMIT 1'"
+			break
 		}
+		if strings.EqualFold(strings.TrimSpace(source), "file") && strings.TrimSpace(filePath) == "" {
+			response = "文件模式需要 file_path，例如：source=file, file_path=/data/sample.fasta"
+			break
+		}
+		response, err = a.esm3Client.AnalyzeSequenceFromSource(source, seq, filePath, dbPath, query)
 	case "generate_protein":
-		response, err = a.esm3Client.GenerateProtein()
+		if toolInput == nil {
+			toolInput = map[string]interface{}{}
+		}
+		minLength := intFromAny(toolInput["min_length"])
+		maxLength := intFromAny(toolInput["max_length"])
+		mustInclude, _ := toolInput["must_include"].(string)
+		forbidden, _ := toolInput["forbidden_aas"].(string)
+		temp := floatFromAny(toolInput["temperature"])
+		response, err = a.esm3Client.GenerateProtein(minLength, maxLength, mustInclude, forbidden, temp)
 	default:
 		response = a.getHelp()
 	}
@@ -466,8 +611,12 @@ func (a *ESM3Agent) getHelp() string {
 
 功能:
 1. 环境检查: "检查环境"
-2. 序列分析: "分析序列 MKGEELF..."
-3. 蛋白质生成: "生成蛋白质"
+2. 序列分析:
+   - 直接输入: "分析序列 MKGEELF..."
+   - 文件输入: "请分析文件 /data/a.fasta 里的蛋白"
+   - 数据库输入: "从数据库读取并分析，query=SELECT sequence FROM sequences LIMIT 1"
+3. 蛋白质生成（可加约束）:
+   - "生成蛋白，长度 180-220，必须包含 GSG，不能有 C"
 
 试试看！`
 }
@@ -596,6 +745,19 @@ func extractSequence(text string) string {
 	return ""
 }
 
+func extractLikelyPath(text string) string {
+	for _, word := range strings.Fields(text) {
+		w := strings.Trim(word, "'\"，。,.!?:;()[]{}")
+		if strings.HasPrefix(w, "/") || strings.Contains(w, "./") {
+			return w
+		}
+		if strings.Contains(w, ".fasta") || strings.Contains(w, ".fa") || strings.Contains(w, ".txt") {
+			return w
+		}
+	}
+	return ""
+}
+
 func isProteinSeq(s string) bool {
 	validAA := "ACDEFGHIKLMNPQRSTVWY"
 	for _, c := range strings.ToUpper(s) {
@@ -604,6 +766,36 @@ func isProteinSeq(s string) bool {
 		}
 	}
 	return true
+}
+
+func intFromAny(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case string:
+		var out int
+		fmt.Sscanf(n, "%d", &out)
+		return out
+	default:
+		return 0
+	}
+}
+
+func floatFromAny(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case string:
+		var out float64
+		fmt.Sscanf(n, "%f", &out)
+		return out
+	default:
+		return 0
+	}
 }
 
 // ============================================================
