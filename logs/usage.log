@@ -1,0 +1,5 @@
+[2026-03-06 16:03:35] User: 检查环境 | Tool: check_environment | Duration: 3.00s | Response: Python: 3.12.12
+PyTorch: 2.5.1+cu121
+CUDA: True
+GPU: NVIDIA GeForce RTX 4090 D
+ESM3: Installed
