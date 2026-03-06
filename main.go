@@ -89,7 +89,7 @@ var ESM3Tools = []map[string]interface{}{
 	{
 		"name":        "check_environment",
 		"description": "检查ESM3环境状态，包括Python、PyTorch、CUDA、ESM3模块",
-		"input_schema": map[string]interface{}{
+		"parameters": map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
 		},
@@ -97,7 +97,7 @@ var ESM3Tools = []map[string]interface{}{
 	{
 		"name":        "analyze_sequence",
 		"description": "分析蛋白质序列的基本特性，包括长度、氨基酸组成、疏水性、电荷等",
-		"input_schema": map[string]interface{}{
+		"parameters": map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"sequence": map[string]string{
@@ -111,7 +111,7 @@ var ESM3Tools = []map[string]interface{}{
 	{
 		"name":        "generate_protein",
 		"description": "使用ESM3模型生成新的GFP蛋白质序列（需要2-5分钟）",
-		"input_schema": map[string]interface{}{
+		"parameters": map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
 		},
@@ -171,8 +171,13 @@ except:
 }
 
 func (c *ESM3Client) AnalyzeSequence(sequence string) (string, error) {
+	cleanSeq := strings.ToUpper(strings.TrimSpace(sequence))
+	if !isProteinSeq(cleanSeq) {
+		return "", fmt.Errorf("invalid protein sequence: only ACDEFGHIKLMNPQRSTVWY is allowed")
+	}
+
 	script := fmt.Sprintf(`
-seq = "%s"
+seq = %q
 length = len(seq)
 aa_counts = {}
 for aa in seq:
@@ -189,7 +194,7 @@ print(f"净电荷: {net_charge:+d}")
 if aa_counts:
     most = max(aa_counts, key=aa_counts.get)
     print(f"最常见: {most} ({aa_counts[most]}次, {aa_counts[most]/length*100:.1f}%%)")
-`, sequence)
+`, cleanSeq)
 	return c.runPython(script)
 }
 
@@ -253,6 +258,27 @@ func (l *LLMClient) CallWithTools(userMessage string, tools []map[string]interfa
 	return toolName, toolInput, nil
 }
 
+func normalizeToolForOpenAI(tool map[string]interface{}) map[string]interface{} {
+	normalized := map[string]interface{}{}
+	for k, v := range tool {
+		normalized[k] = v
+	}
+	if schema, ok := normalized["input_schema"]; ok {
+		normalized["parameters"] = schema
+		delete(normalized, "input_schema")
+	}
+	return normalized
+}
+
+func isAllowedTool(name string) bool {
+	switch name {
+	case "check_environment", "analyze_sequence", "generate_protein":
+		return true
+	default:
+		return false
+	}
+}
+
 func (l *LLMClient) callOpenAICompatible(userMessage string, tools []map[string]interface{}) (string, map[string]interface{}, error) {
 	type openAITool struct {
 		Type     string                 `json:"type"`
@@ -280,7 +306,7 @@ func (l *LLMClient) callOpenAICompatible(userMessage string, tools []map[string]
 	if len(tools) > 0 {
 		convertedTools := make([]openAITool, 0, len(tools))
 		for _, tool := range tools {
-			convertedTools = append(convertedTools, openAITool{Type: "function", Function: tool})
+			convertedTools = append(convertedTools, openAITool{Type: "function", Function: normalizeToolForOpenAI(tool)})
 		}
 		reqBody["tools"] = convertedTools
 		reqBody["tool_choice"] = "auto"
@@ -316,8 +342,8 @@ func (l *LLMClient) callOpenAICompatible(userMessage string, tools []map[string]
 				Content   string `json:"content"`
 				ToolCalls []struct {
 					Function struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
+						Name      string          `json:"name"`
+						Arguments json.RawMessage `json:"arguments"`
 					} `json:"function"`
 				} `json:"tool_calls"`
 			} `json:"message"`
@@ -340,10 +366,13 @@ func (l *LLMClient) callOpenAICompatible(userMessage string, tools []map[string]
 	if call.Function.Name == "" {
 		return "", nil, fmt.Errorf("tool call name is empty")
 	}
+	if !isAllowedTool(call.Function.Name) {
+		return "", nil, fmt.Errorf("unknown tool from llm: %s", call.Function.Name)
+	}
 
 	input := map[string]interface{}{}
-	if strings.TrimSpace(call.Function.Arguments) != "" {
-		if err := json.Unmarshal([]byte(call.Function.Arguments), &input); err != nil {
+	if len(call.Function.Arguments) > 0 && string(call.Function.Arguments) != "null" {
+		if err := json.Unmarshal(call.Function.Arguments, &input); err != nil {
 			return "", nil, fmt.Errorf("parse tool args failed: %w", err)
 		}
 	}
