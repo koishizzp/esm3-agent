@@ -86,6 +86,13 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if strings.TrimSpace(content) == "" || strings.Contains(content, "help") || strings.Contains(content, "帮助") {
+		help := "这是 OpenAI 兼容响应格式，业务文本在 choices[0].message.content。\n\n"
+		help += "如果你想拿到完整设计结果（候选列表、分数、最佳序列），请调用：POST /v1/inference/design"
+		writeChatCompletion(w, help, nil)
+		return
+	}
+
 	designReq := protein_pipeline.DesignRequest{TargetProtein: "GFP", NumCandidates: 8, Rounds: 3}
 	if strings.Contains(content, "迭代") {
 		designReq.Rounds = 5
@@ -93,12 +100,31 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(content, "筛选") {
 		designReq.NumCandidates = 12
 	}
+	if strings.Contains(content, "gsg") {
+		designReq.RequiredMotif = "GSG"
+	}
+	if strings.Contains(content, "不能") && strings.Contains(content, "c") {
+		designReq.ForbiddenAAs = "C"
+	}
+
 	result := s.pipeline.Run(designReq)
+	preview := sequencePreview(result.BestCandidate.Sequence)
+	answer := fmt.Sprintf("已完成自动蛋白设计流程：生成 %d 条候选，自动筛选并评分，最佳候选 %s（score=%.3f，seq=%s）。\n\n如需全部候选明细，请调用 POST /v1/inference/design。",
+		result.TotalGenerated,
+		result.BestCandidate.ID,
+		result.BestCandidate.Score,
+		preview,
+	)
 
-	answer := fmt.Sprintf("已完成自动蛋白设计流程：生成 %d 条候选，自动筛选并评分，最佳序列 %s，得分 %.3f。",
-		result.TotalGenerated, result.BestCandidate.ID, result.BestCandidate.Score)
+	writeChatCompletion(w, answer, map[string]any{
+		"best_candidate":  result.BestCandidate,
+		"total_generated": result.TotalGenerated,
+		"rounds":          result.Rounds,
+	})
+}
 
-	writeJSON(w, map[string]any{
+func writeChatCompletion(w http.ResponseWriter, content string, extra map[string]any) {
+	resp := map[string]any{
 		"id":      fmt.Sprintf("chatcmpl-%d", time.Now().Unix()),
 		"object":  "chat.completion",
 		"created": time.Now().Unix(),
@@ -107,11 +133,22 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			"index": 0,
 			"message": map[string]string{
 				"role":    "assistant",
-				"content": answer,
+				"content": content,
 			},
 			"finish_reason": "stop",
 		}},
-	})
+	}
+	for k, v := range extra {
+		resp[k] = v
+	}
+	writeJSON(w, resp)
+}
+
+func sequencePreview(seq string) string {
+	if len(seq) <= 24 {
+		return seq
+	}
+	return seq[:12] + "..." + seq[len(seq)-12:]
 }
 
 func (s *Server) web(w http.ResponseWriter, r *http.Request) {

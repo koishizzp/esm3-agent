@@ -1,6 +1,6 @@
 # ESM3 Agent（自动蛋白设计实验室）
 
-已升级为 **自动蛋白设计 Agent 系统**，包含完整 inference API 层。
+已升级为 **自动蛋白设计 Agent 系统**，包含 inference API 层。
 
 ## 项目结构
 
@@ -28,8 +28,10 @@ esm3-agent
 ## 快速启动
 
 ```bash
-go run .
+./start.sh
 ```
+
+> `start.sh` 会先 `go build -o esm3-agent .`，避免跑到旧二进制。
 
 服务默认监听 `:8080`。
 
@@ -41,7 +43,7 @@ go run .
 curl http://localhost:8080/health
 ```
 
-### 2) Inference API（核心）
+### 2) Inference API（核心，返回完整结果）
 
 ```bash
 curl -X POST http://localhost:8080/v1/inference/design \
@@ -56,7 +58,7 @@ curl -X POST http://localhost:8080/v1/inference/design \
   }'
 ```
 
-### 3) OpenAI 兼容 chat 接口
+### 3) OpenAI 兼容 chat 接口（返回聊天格式）
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -66,6 +68,16 @@ curl http://localhost:8080/v1/chat/completions \
     "messages":[{"role":"user","content":"请自动设计 GFP 变体并迭代优化"}]
   }'
 ```
+
+## 为什么你只看到 `choices`？
+
+这是 OpenAI Chat Completions 标准格式，主文本就在：
+
+- `choices[0].message.content`
+
+如果你想要完整候选列表、每条序列分数、最佳候选等结构化结果，请调用：
+
+- `POST /v1/inference/design`
 
 ## 说明
 
