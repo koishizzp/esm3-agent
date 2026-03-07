@@ -5,9 +5,14 @@ server:
   host: "0.0.0.0"
 
 esm3:
+  # 二选一：优先 endpoint；若留空则走本地 python + script_dir
+  endpoint: ""
+  api_key: ""
+  model: "esm3-open"
+  timeout: 300
   python_path: "/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python"
   script_dir: "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"
-  timeout: 300  # 5分钟超时
+  entrypoint: ""  # 可选：例如 generate_variants / generate
 
 logging:
   level: "info"  # debug, info, warn, error
@@ -21,5 +26,5 @@ features:
 llm:
   provider: openai
   base_url: https://ai.xingyungept.cn/v1
-  api_key: sk-myAH9OmShY7jgwbReyMPw0qYKrBN4KOaVJPdIvpUNuDLCQrP
+  api_key: ""
   model: gpt-5.3-codex
