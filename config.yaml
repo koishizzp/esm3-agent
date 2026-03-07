@@ -18,3 +18,8 @@ features:
   generation: true
   analysis: true
   structure_prediction: true
+llm:
+  provider: openai
+  base_url: https://ai.xingyungept.cn/v1
+  api_key: sk-myAH9OmShY7jgwbReyMPw0qYKrBN4KOaVJPdIvpUNuDLCQrP
+  model: gpt-5.3-codex
