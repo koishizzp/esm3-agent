@@ -91,6 +91,35 @@ def instantiate_with_flexible_kwargs(cls_obj: Any, module: Any, payload: dict):
     return cls_obj(**kwargs)
 
 
+
+
+def iter_class_level_generation_callables(cls_obj: Any, cls_name: str):
+    for method in [
+        "generate_variants",
+        "generate_sequences",
+        "generate",
+        "run_generation",
+        "design",
+        "infer",
+        "predict",
+        "sample",
+    ]:
+        if not hasattr(cls_obj, method):
+            continue
+        descriptor = inspect.getattr_static(cls_obj, method, None)
+        if isinstance(descriptor, (staticmethod, classmethod)):
+            fn = getattr(cls_obj, method)
+            if callable(fn):
+                yield f"utils.esm_wrapper.{cls_name}.{method}", fn
+
+
+def is_generation_like_method(name: str) -> bool:
+    lower = name.lower()
+    if lower.startswith("_"):
+        return False
+    tokens = ("generate", "design", "run", "infer", "predict", "sample", "propose", "create")
+    return any(tok in lower for tok in tokens)
+
 def build_candidates(module: Any, entrypoint: str, payload: dict):
     candidates: list[tuple[str, Callable[..., Any]]] = []
     instantiate_errors: list[str] = []
@@ -111,6 +140,8 @@ def build_candidates(module: Any, entrypoint: str, payload: dict):
             cls_obj = getattr(module, cls_name)
             if not callable(cls_obj):
                 continue
+            for candidate in iter_class_level_generation_callables(cls_obj, cls_name):
+                candidates.append(candidate)
             instance = None
             ctor_attempts = [
                 ("flex",),
@@ -146,13 +177,11 @@ def build_candidates(module: Any, entrypoint: str, payload: dict):
             continue
         if attr_name in {"ESMWrapper", "ESM3Wrapper", "ESM3Generator", "Generator", "Designer"}:
             continue
-        method_names = [
-            m
-            for m in dir(obj)
-            if ("generate" in m.lower() or m.lower() in {"design", "run"}) and not m.startswith("_")
-        ]
+        method_names = [m for m in dir(obj) if is_generation_like_method(m)]
         if not method_names:
             continue
+        for candidate in iter_class_level_generation_callables(obj, attr_name):
+            candidates.append(candidate)
         instance = None
         for args in [("flex",), (), (getattr(module, "ESM3_SNAPSHOT_DIR", None),)]:
             try:
