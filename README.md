@@ -222,6 +222,7 @@ curl http://127.0.0.1:8000/health
 
 ### 4.2 发起蛋白设计任务
 
+### Health
 ```bash
 curl -X POST http://127.0.0.1:8000/design_protein \
   -H "Content-Type: application/json" \
