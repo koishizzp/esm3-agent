@@ -1,9 +1,13 @@
 package optimizer
 
-import "esm3-agent/protein_pipeline"
+import (
+	"fmt"
+
+	"esm3-agent/protein_pipeline"
+)
 
 type Generator interface {
-	GenerateVariants(base string, round, n int, requiredMotif, forbidden string) []string
+	GenerateVariants(base string, round, n int, requiredMotif, forbidden string) ([]string, error)
 }
 
 type Optimizer struct {
@@ -14,12 +18,15 @@ func NewOptimizer(runner Generator) *Optimizer {
 	return &Optimizer{runner: runner}
 }
 
-func (o *Optimizer) Generate(req protein_pipeline.DesignRequest, round int, seed string) []protein_pipeline.Candidate {
+func (o *Optimizer) Generate(req protein_pipeline.DesignRequest, round int, seed string) ([]protein_pipeline.Candidate, error) {
 	base := seed
 	if base == "" {
 		base = req.BaseSequence
 	}
-	variants := o.runner.GenerateVariants(base, round, req.NumCandidates, req.RequiredMotif, req.ForbiddenAAs)
+	variants, err := o.runner.GenerateVariants(base, round, req.NumCandidates, req.RequiredMotif, req.ForbiddenAAs)
+	if err != nil {
+		return nil, fmt.Errorf("esm3 generation failed: %w", err)
+	}
 	items := make([]protein_pipeline.Candidate, 0, len(variants))
 	for i, v := range variants {
 		items = append(items, protein_pipeline.Candidate{
@@ -28,7 +35,7 @@ func (o *Optimizer) Generate(req protein_pipeline.DesignRequest, round int, seed
 			Round:    round,
 		})
 	}
-	return items
+	return items, nil
 }
 
 func candidateID(round, idx int) string {

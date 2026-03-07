@@ -14,14 +14,16 @@ import (
 
 func main() {
 	listenAddr := ":8080"
-	if cfg, err := config.Load("config.yaml"); err != nil {
+	cfg := config.Config{}
+	if loaded, err := config.Load("config.yaml"); err != nil {
 		log.Printf("⚠️  load config.yaml failed, using defaults/env: %v", err)
 	} else {
+		cfg = loaded
 		cfg.ApplyLLMEnv()
 		listenAddr = cfg.ListenAddr(listenAddr)
 	}
 
-	runner := esm3_runner.NewClient()
+	runner := esm3_runner.NewClientFromConfig(cfg)
 	plan := planner.NewPlanner()
 	eval := evaluator.NewEvaluator()
 	opt := optimizer.NewOptimizer(runner)

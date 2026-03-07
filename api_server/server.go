@@ -14,7 +14,7 @@ import (
 )
 
 type runner interface {
-	Run(req protein_pipeline.DesignRequest) protein_pipeline.DesignResult
+	Run(req protein_pipeline.DesignRequest) (protein_pipeline.DesignResult, error)
 }
 
 type Server struct {
@@ -73,7 +73,11 @@ func (s *Server) design(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	result := s.pipeline.Run(req)
+	result, err := s.pipeline.Run(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
 	writeJSON(w, result)
 }
 
@@ -214,7 +218,11 @@ func (s *Server) buildUpstreamMessages(raw any, userContent string) []map[string
 	content := strings.ToLower(strings.TrimSpace(userContent))
 	if content != "" && !strings.Contains(content, "help") && !strings.Contains(content, "帮助") {
 		designReq := inferDesignRequest(content)
-		result := s.pipeline.Run(designReq)
+		result, err := s.pipeline.Run(designReq)
+		if err != nil {
+			messages = append(messages, map[string]string{"role": "system", "content": "ESM3 design execution failed: " + err.Error()})
+			return messages
+		}
 		summary := map[string]any{
 			"request":         designReq,
 			"best_candidate":  result.BestCandidate,
@@ -259,7 +267,11 @@ func respondWithPrompt(s *Server, w http.ResponseWriter, content string) {
 	}
 
 	designReq := inferDesignRequest(content)
-	result := s.pipeline.Run(designReq)
+	result, err := s.pipeline.Run(designReq)
+	if err != nil {
+		writeChatCompletion(w, "ESM3 推理失败："+err.Error()+"。请检查 esm3 配置和本地环境。", nil)
+		return
+	}
 	preview := sequencePreview(result.BestCandidate.Sequence)
 	answer := fmt.Sprintf("已完成自动蛋白设计流程：生成 %d 条候选，自动筛选并评分，最佳候选 %s（score=%.3f，seq=%s）。\n\n如需全部候选明细，请调用 POST /v1/inference/design。",
 		result.TotalGenerated,
