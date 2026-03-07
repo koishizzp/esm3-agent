@@ -20,11 +20,12 @@ type DesignPlan struct {
 }
 
 type Candidate struct {
-	ID       string  `json:"id"`
-	Sequence string  `json:"sequence"`
-	Round    int     `json:"round"`
-	Score    float64 `json:"score"`
-	Reason   string  `json:"reason"`
+	ID       string             `json:"id"`
+	Sequence string             `json:"sequence"`
+	Round    int                `json:"round"`
+	Score    float64            `json:"score"`
+	Reason   string             `json:"reason"`
+	Metrics  map[string]float64 `json:"metrics,omitempty"`
 }
 
 type DesignResult struct {

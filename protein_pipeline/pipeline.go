@@ -1,6 +1,7 @@
 package protein_pipeline
 
 import (
+	"fmt"
 	"sort"
 )
 
@@ -13,7 +14,7 @@ type evaluator interface {
 }
 
 type optimizer interface {
-	Generate(req DesignRequest, round int, seed string) []Candidate
+	Generate(req DesignRequest, round int, seed string) ([]Candidate, error)
 }
 
 type Pipeline struct {
@@ -26,7 +27,7 @@ func NewPipeline(planner planBuilder, evaluator evaluator, optimizer optimizer) 
 	return &Pipeline{planner: planner, evaluator: evaluator, optimizer: optimizer}
 }
 
-func (p *Pipeline) Run(req DesignRequest) DesignResult {
+func (p *Pipeline) Run(req DesignRequest) (DesignResult, error) {
 	normalize(&req)
 	plan := p.planner.Build(req)
 
@@ -35,7 +36,13 @@ func (p *Pipeline) Run(req DesignRequest) DesignResult {
 	best := Candidate{Score: -9999}
 
 	for round := 1; round <= req.Rounds; round++ {
-		batch := p.optimizer.Generate(req, round, bestSeed)
+		batch, err := p.optimizer.Generate(req, round, bestSeed)
+		if err != nil {
+			return DesignResult{}, fmt.Errorf("round %d generate failed: %w", round, err)
+		}
+		if len(batch) == 0 {
+			return DesignResult{}, fmt.Errorf("round %d generate returned empty candidates", round)
+		}
 		for _, c := range batch {
 			scored := p.evaluator.Score(req, c)
 			all = append(all, scored)
@@ -56,7 +63,7 @@ func (p *Pipeline) Run(req DesignRequest) DesignResult {
 		AllCandidates:  all,
 		TotalGenerated: len(all),
 		Rounds:         req.Rounds,
-	}
+	}, nil
 }
 
 func normalize(req *DesignRequest) {
