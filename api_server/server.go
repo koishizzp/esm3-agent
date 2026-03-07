@@ -64,6 +64,18 @@ func (s *Server) design(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		query := strings.TrimSpace(r.URL.Query().Get("q"))
+		if query == "" {
+			help := "该接口是 OpenAI 兼容格式，建议使用 POST JSON。\n"
+			help += "浏览器快速体验可用：/v1/chat/completions?q=请自动设计GFP并迭代"
+			writeChatCompletion(w, help, nil)
+			return
+		}
+		respondWithPrompt(s, w, strings.ToLower(query))
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -85,7 +97,10 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	respondWithPrompt(s, w, content)
+}
 
+func respondWithPrompt(s *Server, w http.ResponseWriter, content string) {
 	if strings.TrimSpace(content) == "" || strings.Contains(content, "help") || strings.Contains(content, "帮助") {
 		help := "这是 OpenAI 兼容响应格式，业务文本在 choices[0].message.content。\n\n"
 		help += "如果你想拿到完整设计结果（候选列表、分数、最佳序列），请调用：POST /v1/inference/design"

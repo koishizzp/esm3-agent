@@ -69,6 +69,12 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
+也支持浏览器快速调试（GET）：
+
+```bash
+http://localhost:8080/v1/chat/completions?q=请自动设计GFP并迭代
+```
+
 ## 为什么你只看到 `choices`？
 
 这是 OpenAI Chat Completions 标准格式，主文本就在：
@@ -78,6 +84,29 @@ curl http://localhost:8080/v1/chat/completions \
 如果你想要完整候选列表、每条序列分数、最佳候选等结构化结果，请调用：
 
 - `POST /v1/inference/design`
+
+## Windows 连到服务器后，为什么还是不对？
+
+关键点：`localhost` 永远指“当前访问端”。
+
+- 你在 **服务器终端** 执行 `curl http://localhost:8080/...`：访问的是服务器。
+- 你在 **Windows 本地浏览器** 打开 `http://localhost:8080/...`：访问的是你自己的 Windows，不是服务器。
+
+如果你想在 Windows 浏览器访问服务器上的 8080：
+
+1. 用 SSH 端口转发（推荐）
+
+```bash
+ssh -L 8080:127.0.0.1:8080 <user>@<server_ip>
+```
+
+然后在 Windows 浏览器打开：`http://localhost:8080/health`
+
+2. 或直接访问服务器 IP（需放通防火墙/安全组）
+
+```bash
+http://<server_ip>:8080/health
+```
 
 ## 说明
 
