@@ -1,50 +1,184 @@
-# Autonomous AI Protein Design Agent (ESM3)
+# 基于 ESM3 的自治蛋白设计 Agent（中文详细版）
 
-This repository now includes a Python modular agent stack for autonomous protein engineering with a local ESM3 server.
+本仓库新增了一套 **Python 模块化自治蛋白设计系统**，目标是让用户通过自然语言任务（如：`Design an improved GFP and iteratively optimize it.`）触发自动化实验循环：
 
-## Project Structure
+> 用户任务 → LLM 规划 → 工具执行 → ESM3 推理（生成/突变/结构）→ 候选评分 → 迭代优化 → 记忆沉淀
+
+该系统强调：
+
+- **本地真实 ESM3 模型服务**（非 mock）
+- **可扩展工具化架构**
+- **可追踪实验记忆**
+- **可通过 REST API 直接集成**
+
+---
+
+## 1. 仓库结构（已实现）
 
 ```text
 protein_agent/
   agent/
-    planner.py
-    executor.py
-    workflow.py
+    planner.py             # LLM 规划器：自然语言 -> 结构化计划
+    executor.py            # 工具执行层：统一调用生成/突变/结构/评分
+    workflow.py            # 迭代实验引擎：generate -> evaluate -> select -> mutate -> repeat
+
   tools/
-    base.py
-    esm3_generate.py
-    esm3_mutate.py
-    esm3_structure.py
-    protein_score.py
+    base.py                # Tool 抽象接口（name/description/input_schema/execute）
+    esm3_generate.py       # 调用 ESM3 Server 的序列生成接口
+    esm3_mutate.py         # 调用 ESM3 Server 的突变接口
+    esm3_structure.py      # 调用 ESM3 Server 的结构预测接口
+    protein_score.py       # 蛋白评分模块（序列 + 结构置信度）
+
   esm3_server/
-    server.py
+    server.py              # 本地 ESM3 FastAPI 服务（模型单次加载）
+
   memory/
-    experiment_memory.py
+    experiment_memory.py   # 实验记忆：记录每轮候选与最优结果
+
   workflows/
-    gfp_optimizer.py
+    gfp_optimizer.py       # GFP 内置工作流（含 scaffold）
+
   api/
-    main.py
+    main.py                # Agent API：POST /design_protein
+
   config/
-    settings.py
+    settings.py            # 统一配置（环境变量 + 默认值）
+
   scripts/
-    run_design_example.py
+    run_design_example.py  # 示例请求脚本
+
 requirements.txt
 README.md
 ```
 
-## Architecture
+---
 
-User Prompt → LLM Planner → Task Plan → Tool Executor → ESM3 + Evaluation → Iterative Loop + Memory.
+## 2. 核心模块详解
 
-### Core Components
-- **LLM Planner**: Converts natural language into structured JSON experiment plans.
-- **Tool Execution Layer**: Calls ESM3 generate/mutate/structure endpoints and scoring.
-- **ESM3 Model Server**: Loads ESM3 once and provides API endpoints.
-- **Experiment Loop Engine**: Runs iterative generate/evaluate/select/mutate cycles.
-- **Protein Evaluation Module**: Scores candidates with sequence and structure-aware features.
-- **Experiment Memory**: Stores sequence, mutation history, score, iteration, and structure data.
+### 2.1 LLM Planner（`agent/planner.py`）
 
-## Setup
+职责：把自然语言任务转成结构化 JSON 计划，包含：
+
+- workflow 名称
+- target
+- max_iterations
+- patience
+- candidates_per_round
+- steps 列表
+
+实现细节：
+
+1. 如果配置了 OpenAI 兼容参数（`PROTEIN_AGENT_OPENAI_API_KEY`），会调用 LLM 生成 JSON 计划。
+2. 若未配置或 LLM 输出不可解析，会回退到**确定性计划模板**，保证系统可运行。
+
+> 这样设计的好处是：在线上你可以接入任意兼容网关做更强规划；离线环境仍可稳定执行迭代实验。
+
+### 2.2 Tool Execution Layer（`agent/executor.py` + `tools/*`）
+
+职责：把工作流动作映射为工具调用，统一外部依赖入口。
+
+- `generate(prompt, n)` → `esm3_generate`
+- `mutate(sequence, ...)` → `esm3_mutate`
+- `evaluate(sequence)` → `esm3_structure + protein_score`
+
+工具统一遵循：
+
+```python
+class Tool:
+    name
+    description
+    input_schema
+    execute(input_data)
+```
+
+这使得后续可非常容易追加新工具（如溶解度预测、二聚体打分、表达可行性约束等）。
+
+### 2.3 ESM3 Model Server（`esm3_server/server.py`）
+
+职责：封装本地 ESM3 推理能力，并通过 FastAPI 提供服务。
+
+启动时：
+
+- 自动检测 GPU（`torch.cuda.is_available()`）
+- 执行 `from esm.models.esm3 import ESM3`
+- `from_pretrained(...)` 单次加载模型并置为 eval
+
+接口：
+
+- `POST /generate_sequence`
+- `POST /mutate_sequence`
+- `POST /predict_structure`
+
+> 该层与 Agent 层解耦：你可以单独扩展推理服务（多 GPU、队列、批处理）而不改上层编排逻辑。
+
+### 2.4 Experiment Loop Engine（`agent/workflow.py`）
+
+默认循环逻辑：
+
+1. 初始生成候选（generate）
+2. 逐条评估（predict_structure + score）
+3. 选出 top 变体
+4. 对 top 做突变扩增（mutate）
+5. 进入下一轮
+
+停止条件：
+
+- 达到 `max_iterations`（上限 100）
+- 连续 `patience` 轮无提升
+
+> 这与“自动化定向进化”的实验过程对应：探索（generate）+开发（top 变体突变）并行推进。
+
+### 2.5 Protein Evaluation Module（`tools/protein_score.py`）
+
+评分输入：
+
+- 序列本身（氨基酸构成）
+- 结构预测置信度（来自结构工具）
+
+评分输出：
+
+- `score`
+- `metrics`（疏水比例、带电比例、荧光提示残基比例、长度等）
+
+当前实现为可解释的启发式组合分数，便于调参与审计；后续可替换为实验数据拟合模型。
+
+### 2.6 Experiment Memory（`memory/experiment_memory.py`）
+
+每个记录包含：
+
+- `sequence`
+- `mutation_history`
+- `score`
+- `iteration`
+- `structure_data`
+- `metadata`
+
+支持：
+
+- 全记录导出
+- top-k 查询
+- best 结果查询
+
+API 返回中包含完整 `history` 与 `best_sequences`，便于复盘。
+
+### 2.7 GFP Workflow（`workflows/gfp_optimizer.py`）
+
+内置 GFP scaffold，并提供固定步骤计划：
+
+1. 识别 GFP scaffold
+2. 生成突变候选
+3. 结构预测
+4. 候选评分
+5. 选择最优
+6. 继续迭代（可到 100 轮）
+
+当任务文本包含 `gfp` 时，API 会自动走该工作流。
+
+---
+
+## 3. 安装与运行（本地）
+
+## 3.1 Python 环境
 
 ```bash
 python -m venv .venv
@@ -52,58 +186,159 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run ESM3 Server (local model)
+> 依赖里已声明：`fastapi`、`requests`、`pydantic`、`openai`、`torch`、`esm`、`transformers` 等。
+
+## 3.2 启动 ESM3 模型服务
 
 ```bash
 export ESM3_MODEL_NAME=esm3-open
 uvicorn protein_agent.esm3_server.server:app --host 0.0.0.0 --port 8001
 ```
 
-## Run Agent API
+如果你部署的是其他本地权重名，可替换 `ESM3_MODEL_NAME`。
+
+## 3.3 启动 Agent API
 
 ```bash
 export PROTEIN_AGENT_ESM3_SERVER_URL=http://127.0.0.1:8001
-# Optional LLM planner config
+
+# 可选：启用 LLM 规划器
 export PROTEIN_AGENT_OPENAI_API_KEY=<your_key>
-export PROTEIN_AGENT_OPENAI_BASE_URL=<optional_openai_compatible_endpoint>
+export PROTEIN_AGENT_OPENAI_BASE_URL=<兼容端点，可不填>
 export PROTEIN_AGENT_LLM_MODEL=gpt-4o-mini
 
 uvicorn protein_agent.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-## API Usage
+---
 
-### Health
+## 4. API 使用方式
+
+### 4.1 健康检查
+
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-### Design Protein
+### 4.2 发起蛋白设计任务
+
+### Health
 ```bash
 curl -X POST http://127.0.0.1:8000/design_protein \
   -H "Content-Type: application/json" \
-  -d '{"task":"design a brighter GFP variant","max_iterations":20}'
+  -d '{
+    "task": "design a brighter GFP variant",
+    "max_iterations": 20,
+    "candidates_per_round": 8,
+    "patience": 6
+  }'
 ```
 
-Response contains experiment history, best sequence, and scores.
+返回字段说明：
 
-## GFP Workflow
+- `task`: 原始任务
+- `plan`: 规划器输出计划
+- `history`: 全实验轨迹（每条序列的评分与结构信息）
+- `best_sequences`: 当前最优变体摘要
 
-Built-in workflow in `protein_agent/workflows/gfp_optimizer.py`:
-1. Identify GFP scaffold
-2. Generate mutations
-3. Predict structure
-4. Score candidates
-5. Select best variants
-6. Repeat (up to 100 iterations)
+---
 
-## Example Run Script
+## 5. 示例脚本
 
 ```bash
 python protein_agent/scripts/run_design_example.py
 ```
 
-## Notes
+该脚本会向 `http://127.0.0.1:8000/design_protein` 提交示例任务并打印返回 JSON。
 
-- The implementation is designed for **local ESM3 inference** (`from esm.models.esm3 import ESM3`).
-- Iterations stop on either `max_iterations` or plateau (`patience` rounds with no improvement).
+---
+
+## 6. 关键配置（环境变量）
+
+以 `PROTEIN_AGENT_` 为前缀，常用项：
+
+- `PROTEIN_AGENT_ESM3_SERVER_URL`：ESM3 服务地址（默认 `http://127.0.0.1:8001`）
+- `PROTEIN_AGENT_REQUEST_TIMEOUT`：工具请求超时
+- `PROTEIN_AGENT_MAX_ITERATIONS`：默认最大迭代（上限 100）
+- `PROTEIN_AGENT_DEFAULT_CANDIDATES`：每轮候选数
+- `PROTEIN_AGENT_DEFAULT_PATIENCE`：无提升容忍轮数
+- `PROTEIN_AGENT_OPENAI_API_KEY`：LLM 规划器密钥
+- `PROTEIN_AGENT_OPENAI_BASE_URL`：兼容 LLM 网关地址
+- `PROTEIN_AGENT_LLM_MODEL`：规划模型名
+
+---
+
+## 7. 工程说明与扩展建议
+
+### 7.1 关于“真实实现”
+
+本实现没有在主流程里使用 mock 分支：
+
+- 生成/突变/结构接口都走 ESM3 服务
+- 评分走真实计算逻辑
+- 迭代引擎基于评分结果做真实选择与再突变
+
+### 7.2 推荐下一步（可按你实验目标继续增强）
+
+1. **结构生物学特征增强**：加入二级结构比例、接触图一致性、核心位点约束。
+2. **多目标优化**：亮度、稳定性、表达可行性联合 Pareto 排序。
+3. **实验闭环**：将湿实验结果回写 memory，做主动学习。
+4. **并行化执行**：引入 Redis/Celery/Ray 将结构预测和评分并发化。
+5. **持久化记忆**：从内存结构升级到 SQLite/PostgreSQL。
+
+---
+
+## 8. 常见问题排查（FAQ）
+
+### Q1: 启动时报 `No module named fastapi` / `No module named esm`
+
+说明当前 Python 环境未安装依赖，请在激活虚拟环境后执行：
+
+```bash
+pip install -r requirements.txt
+```
+
+### Q2: ESM3 模型加载失败
+
+请确认：
+
+- `esm` 版本与模型权重兼容
+- 运行账号有本地权重访问权限
+- CUDA / 驱动版本匹配（如使用 GPU）
+
+### Q3: 结果收敛慢或无提升
+
+可尝试：
+
+- 提高 `candidates_per_round`
+- 增大 `max_iterations`
+- 调低或调高 `patience`
+- 调整评分权重，使目标函数更贴合你的实验目标
+
+---
+
+## 9. 最小可运行命令清单
+
+```bash
+# 1) 安装
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2) 启动 ESM3 server
+export ESM3_MODEL_NAME=esm3-open
+uvicorn protein_agent.esm3_server.server:app --host 0.0.0.0 --port 8001
+
+# 3) 启动 Agent API（另一个终端）
+export PROTEIN_AGENT_ESM3_SERVER_URL=http://127.0.0.1:8001
+uvicorn protein_agent.api.main:app --host 0.0.0.0 --port 8000
+
+# 4) 请求任务
+curl -X POST http://127.0.0.1:8000/design_protein \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Design an improved GFP and iteratively optimize it."}'
+```
+
+---
+
+如果你愿意，我下一步可以继续把 README 再细化成“**你当前服务器部署参数**”的一键版（例如写成 `start_esm3.sh + start_agent.sh + smoke_test.sh`），并加入更贴近 GFP 的定制评分项。
