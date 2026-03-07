@@ -41,10 +41,11 @@ type generateResponse struct {
 	Data      []struct {
 		Sequence string `json:"sequence"`
 	} `json:"data"`
-	Error            string   `json:"error"`
-	Attempts         []string `json:"attempts"`
-	AvailableSymbols []string `json:"available_symbols"`
-	EntrypointUsed   string   `json:"entrypoint_used"`
+	Error             string   `json:"error"`
+	Attempts          []string `json:"attempts"`
+	AvailableSymbols  []string `json:"available_symbols"`
+	GenerationRelated []string `json:"generation_related_symbols"`
+	EntrypointUsed    string   `json:"entrypoint_used"`
 }
 
 func NewClient() *Client {
@@ -161,6 +162,13 @@ func (c *Client) generateByLocalPython(base string, round, n int, requiredMotif,
 				max = 30
 			}
 			detail += "; available_symbols=" + strings.Join(parsed.AvailableSymbols[:max], ",")
+		}
+		if len(parsed.GenerationRelated) > 0 {
+			max := len(parsed.GenerationRelated)
+			if max > 20 {
+				max = 20
+			}
+			detail += "; generation_related_symbols=" + strings.Join(parsed.GenerationRelated[:max], ",")
 		}
 		return nil, fmt.Errorf("python bridge error: %s", detail)
 	}

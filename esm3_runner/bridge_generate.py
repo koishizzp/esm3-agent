@@ -74,20 +74,62 @@ def build_candidates(module: Any, entrypoint: str):
             if callable(obj):
                 candidates.append((f"utils.esm_wrapper.{name}", obj))
 
-    for cls_name in ["ESMWrapper", "ESM3Wrapper", "Generator", "Designer"]:
+    for cls_name in ["ESMWrapper", "ESM3Wrapper", "ESM3Generator", "Generator", "Designer"]:
         if hasattr(module, cls_name):
             cls_obj = getattr(module, cls_name)
             if not callable(cls_obj):
                 continue
-            try:
-                instance = cls_obj()
-            except Exception:
+            instance = None
+            ctor_attempts = [
+                (),
+                (getattr(module, "ESM3_SNAPSHOT_DIR", None),),
+                (getattr(module, "ESM_SOURCE_PATH", None),),
+            ]
+            for args in ctor_attempts:
+                args = tuple(a for a in args if a is not None)
+                try:
+                    instance = cls_obj(*args)
+                    break
+                except Exception:
+                    continue
+            if instance is None:
                 continue
-            for method in ["generate_variants", "generate_sequences", "generate", "run_generation", "design"]:
+            for method in ["generate_variants", "generate_sequences", "generate", "run_generation", "design", "__call__"]:
                 if hasattr(instance, method):
                     fn = getattr(instance, method)
                     if callable(fn):
                         candidates.append((f"utils.esm_wrapper.{cls_name}().{method}", fn))
+
+    # Auto-discover any class that exposes generation-like methods.
+    for attr_name in dir(module):
+        if attr_name.startswith("_"):
+            continue
+        obj = getattr(module, attr_name)
+        if not inspect.isclass(obj):
+            continue
+        if attr_name in {"ESMWrapper", "ESM3Wrapper", "ESM3Generator", "Generator", "Designer"}:
+            continue
+        method_names = [
+            m
+            for m in dir(obj)
+            if ("generate" in m.lower() or m.lower() in {"design", "run"}) and not m.startswith("_")
+        ]
+        if not method_names:
+            continue
+        instance = None
+        for args in [(), (getattr(module, "ESM3_SNAPSHOT_DIR", None),)]:
+            args = tuple(a for a in args if a is not None)
+            try:
+                instance = obj(*args)
+                break
+            except Exception:
+                continue
+        if instance is None:
+            continue
+        for method in method_names:
+            fn = getattr(instance, method, None)
+            if callable(fn):
+                candidates.append((f"utils.esm_wrapper.{attr_name}().{method}", fn))
 
     # de-dup by name preserving order
     seen = set()
@@ -122,11 +164,13 @@ def main():
     candidates = build_candidates(module, entrypoint)
     if not candidates:
         available = [x for x in dir(module) if not x.startswith("_")][:80]
+        generation_related = [x for x in available if "generate" in x.lower() or "design" in x.lower() or "esm3" in x.lower()]
         print(
             json.dumps(
                 {
                     "error": "no callable generation entry found in utils.esm_wrapper",
                     "available_symbols": available,
+                    "generation_related_symbols": generation_related,
                 }
             )
         )
