@@ -94,9 +94,15 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	if s.upstreamEnabled() {
-		s.proxyChat(w, r)
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -106,18 +112,32 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			Content string `json:"content"`
 		} `json:"messages"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	content := latestUserContent(req.Messages)
+
+	if s.upstreamEnabled() {
+		s.proxyChat(w, payload, content)
+		return
+	}
+
+	respondWithPrompt(s, w, strings.ToLower(content))
+}
+
+func latestUserContent(messages []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}) string {
 	content := ""
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == "user" {
-			content = strings.ToLower(req.Messages[i].Content)
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			content = messages[i].Content
 			break
 		}
 	}
-	respondWithPrompt(s, w, content)
+	return content
 }
 
 func (s *Server) provider(w http.ResponseWriter, _ *http.Request) {
@@ -142,21 +162,11 @@ func (s *Server) upstreamEnabled() bool {
 	return s.upstreamURL != "" && s.upstreamKey != ""
 }
 
-func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
+func (s *Server) proxyChat(w http.ResponseWriter, payload map[string]any, userContent string) {
 	if s.upstreamModel != "" {
 		payload["model"] = s.upstreamModel
 	}
+	payload["messages"] = s.buildUpstreamMessages(payload["messages"], userContent)
 	patched, _ := json.Marshal(payload)
 
 	upstream := strings.TrimRight(s.upstreamURL, "/") + "/chat/completions"
@@ -180,14 +190,50 @@ func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, resp.Body)
 }
 
-func respondWithPrompt(s *Server, w http.ResponseWriter, content string) {
-	if strings.TrimSpace(content) == "" || strings.Contains(content, "help") || strings.Contains(content, "帮助") {
-		help := "这是 OpenAI 兼容响应格式，业务文本在 choices[0].message.content。\n\n"
-		help += "如果你想拿到完整设计结果（候选列表、分数、最佳序列），请调用：POST /v1/inference/design"
-		writeChatCompletion(w, help, nil)
-		return
+func (s *Server) buildUpstreamMessages(raw any, userContent string) []map[string]string {
+	system := "你是 ESM3 蛋白设计助手。你的职责是基于给定设计结果解释分数、候选优先级与下一步实验建议，不要偏离 ESM3 场景。"
+	system += "当用户询问候选分数时，优先解释 best_candidate.score、候选排序与 round 配置；需要完整明细时提醒调用 POST /v1/inference/design。"
+
+	messages := []map[string]string{{"role": "system", "content": system}}
+
+	if existing, ok := raw.([]any); ok {
+		for _, msg := range existing {
+			m, ok := msg.(map[string]any)
+			if !ok {
+				continue
+			}
+			role, _ := m["role"].(string)
+			content, _ := m["content"].(string)
+			if role == "" || content == "" {
+				continue
+			}
+			messages = append(messages, map[string]string{"role": role, "content": content})
+		}
 	}
 
+	content := strings.ToLower(strings.TrimSpace(userContent))
+	if content != "" && !strings.Contains(content, "help") && !strings.Contains(content, "帮助") {
+		designReq := inferDesignRequest(content)
+		result := s.pipeline.Run(designReq)
+		summary := map[string]any{
+			"request":         designReq,
+			"best_candidate":  result.BestCandidate,
+			"total_generated": result.TotalGenerated,
+			"rounds":          result.Rounds,
+			"candidates":      result.AllCandidates,
+		}
+		if b, err := json.Marshal(summary); err == nil {
+			messages = append(messages, map[string]string{
+				"role":    "system",
+				"content": "以下是本次 ESM3 设计执行结果（JSON），请严格基于这些字段回答：\n" + string(b),
+			})
+		}
+	}
+
+	return messages
+}
+
+func inferDesignRequest(content string) protein_pipeline.DesignRequest {
 	designReq := protein_pipeline.DesignRequest{TargetProtein: "GFP", NumCandidates: 8, Rounds: 3}
 	if strings.Contains(content, "迭代") {
 		designReq.Rounds = 5
@@ -201,7 +247,18 @@ func respondWithPrompt(s *Server, w http.ResponseWriter, content string) {
 	if strings.Contains(content, "不能") && strings.Contains(content, "c") {
 		designReq.ForbiddenAAs = "C"
 	}
+	return designReq
+}
 
+func respondWithPrompt(s *Server, w http.ResponseWriter, content string) {
+	if strings.TrimSpace(content) == "" || strings.Contains(content, "help") || strings.Contains(content, "帮助") {
+		help := "这是 OpenAI 兼容响应格式，业务文本在 choices[0].message.content。\n\n"
+		help += "如果你想拿到完整设计结果（候选列表、分数、最佳序列），请调用：POST /v1/inference/design"
+		writeChatCompletion(w, help, nil)
+		return
+	}
+
+	designReq := inferDesignRequest(content)
 	result := s.pipeline.Run(designReq)
 	preview := sequencePreview(result.BestCandidate.Sequence)
 	answer := fmt.Sprintf("已完成自动蛋白设计流程：生成 %d 条候选，自动筛选并评分，最佳候选 %s（score=%.3f，seq=%s）。\n\n如需全部候选明细，请调用 POST /v1/inference/design。",
