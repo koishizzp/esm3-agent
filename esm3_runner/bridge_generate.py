@@ -61,29 +61,19 @@ def call_with_flexible_kwargs(fn: Callable[..., Any], payload: dict):
 
 
 def instantiate_with_flexible_kwargs(cls_obj: Any, module: Any, payload: dict):
-    seq = (payload.get("sequence") or "").strip().upper()
-    n = max(1, int(payload.get("num_candidates") or 6))
-    round_idx = int(payload.get("round") or 1)
-
     aliases = {
         "model": ["model", "model_name", "name"],
         "device": ["device", "torch_device"],
         "snapshot_dir": ["snapshot_dir", "snapshot", "esm3_snapshot_dir", "weights_dir"],
         "source_path": ["source_path", "esm_source_path", "repo_path"],
         "data_path": ["data_path", "local_data_path"],
-        "sequence": ["sequence", "seq", "base_sequence", "seed_sequence", "input_sequence"],
-        "num_candidates": ["num_candidates", "n", "count", "batch_size", "num_samples"],
-        "round": ["round", "round_idx", "iteration", "step"],
     }
     values = {
         "model": os.environ.get("ESM3_MODEL", "").strip() or payload.get("model") or "",
-        "device": os.environ.get("ESM3_DEVICE", "").strip() or "cuda",
+        "device": os.environ.get("ESM3_DEVICE", "").strip(),
         "snapshot_dir": getattr(module, "ESM3_SNAPSHOT_DIR", None),
         "source_path": getattr(module, "ESM_SOURCE_PATH", None),
         "data_path": getattr(module, "LOCAL_DATA_PATH", None),
-        "sequence": seq,
-        "num_candidates": n,
-        "round": round_idx,
     }
 
     sig = inspect.signature(cls_obj)
@@ -121,11 +111,6 @@ def build_candidates(module: Any, entrypoint: str, payload: dict):
             cls_obj = getattr(module, cls_name)
             if not callable(cls_obj):
                 continue
-            for method in ["generate_variants", "generate_sequences", "generate", "run_generation", "design"]:
-                if hasattr(cls_obj, method):
-                    class_fn = getattr(cls_obj, method)
-                    if callable(class_fn):
-                        candidates.append((f"utils.esm_wrapper.{cls_name}.{method}", class_fn))
             instance = None
             ctor_attempts = [
                 ("flex",),
