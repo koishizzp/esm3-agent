@@ -5,25 +5,230 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ESM3 自动蛋白设计 Agent</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 780px; margin: 2rem auto; line-height: 1.5; }
-    code { background: #f2f2f2; padding: 2px 6px; border-radius: 4px; }
-    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    :root { color-scheme: light; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 920px;
+      margin: 1.5rem auto;
+      line-height: 1.5;
+      padding: 0 1rem;
+      color: #1b1f23;
+      background: #f8fafc;
+    }
+    h1 { margin-bottom: .5rem; }
+    .muted { color: #5f6b7a; }
+    code { background: #eef2f7; padding: 2px 6px; border-radius: 4px; }
+    .card {
+      background: #fff;
+      border: 1px solid #dde3ea;
+      border-radius: 12px;
+      padding: 1rem;
+      margin: 1rem 0;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+    }
+    .chat-window {
+      height: 420px;
+      overflow: auto;
+      border: 1px solid #d7dee7;
+      border-radius: 10px;
+      padding: .8rem;
+      background: #fbfdff;
+      display: flex;
+      flex-direction: column;
+      gap: .7rem;
+    }
+    .msg {
+      max-width: 88%;
+      border-radius: 10px;
+      padding: .6rem .75rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .user { align-self: flex-end; background: #dbeafe; border: 1px solid #bfdbfe; }
+    .assistant { align-self: flex-start; background: #f1f5f9; border: 1px solid #dce3ea; }
+    .controls {
+      margin-top: .8rem;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: .6rem;
+    }
+    textarea {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      min-height: 84px;
+      padding: .7rem;
+      resize: vertical;
+      font: inherit;
+    }
+    button {
+      border: 1px solid #1d4ed8;
+      border-radius: 10px;
+      background: #2563eb;
+      color: #fff;
+      padding: .65rem .9rem;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 600;
+    }
+    button.secondary { background: #fff; color: #1e40af; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .quick-actions {
+      margin-top: .7rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+    }
+    .status { margin-top: .45rem; font-size: .95rem; }
+    .result-meta {
+      margin-top: .7rem;
+      border-top: 1px dashed #cbd5e1;
+      padding-top: .7rem;
+      font-size: .95rem;
+      color: #334155;
+    }
   </style>
 </head>
 <body>
   <h1>🧬 ESM3 自动蛋白设计 Agent</h1>
+  <p class="muted">不只支持 curl。你可以在这个页面直接连续多轮对话，就像聊天助手一样。</p>
+
   <div class="card">
     <p>系统能力：</p>
     <ul>
       <li>自动设计 GFP 变体</li>
-      <li>自动筛选</li>
-      <li>自动评分</li>
+      <li>自动筛选 + 评分</li>
       <li>自动迭代优化</li>
+      <li>返回最佳候选与结构化信息</li>
     </ul>
+    <p class="muted">API 仍可用：<code>POST /v1/chat/completions</code>、<code>POST /v1/inference/design</code></p>
   </div>
+
   <div class="card">
-    <p>Inference API:</p>
-    <code>POST /v1/inference/design</code>
+    <h2 style="margin-top:0">交互式对话</h2>
+    <div id="chatWindow" class="chat-window" aria-live="polite"></div>
+
+    <div class="controls">
+      <textarea id="prompt" placeholder="例如：请自动设计 GFP 变体并迭代优化，尽量保留 GSG motif，避免 C。"></textarea>
+      <div style="display:flex; flex-direction:column; gap:.5rem;">
+        <button id="sendBtn">发送</button>
+        <button id="clearBtn" class="secondary">清空会话</button>
+      </div>
+    </div>
+
+    <div class="quick-actions">
+      <button class="secondary" data-q="请自动设计 GFP 并迭代优化">示例：自动迭代</button>
+      <button class="secondary" data-q="请做更严格筛选，并加入 GSG motif">示例：筛选 + motif</button>
+      <button class="secondary" data-q="请帮助我理解你返回的候选分数">示例：解释结果</button>
+    </div>
+
+    <div id="status" class="status muted"></div>
+    <div id="meta" class="result-meta" hidden></div>
   </div>
+
+  <script>
+    const chatWindow = document.getElementById('chatWindow');
+    const promptEl = document.getElementById('prompt');
+    const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const statusEl = document.getElementById('status');
+    const metaEl = document.getElementById('meta');
+    const quickButtons = document.querySelectorAll('[data-q]');
+
+    const conversation = [
+      { role: 'assistant', content: '你好，我是 ESM3 设计助手。你可以直接说目标（如 GFP、motif、禁用氨基酸、迭代轮数），我会自动调用设计流程并总结结果。' }
+    ];
+
+    function renderConversation() {
+      chatWindow.innerHTML = '';
+      for (const msg of conversation) {
+        const div = document.createElement('div');
+        div.className = `msg ${msg.role === 'user' ? 'user' : 'assistant'}`;
+        div.textContent = msg.content;
+        chatWindow.appendChild(div);
+      }
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function setBusy(isBusy) {
+      sendBtn.disabled = isBusy;
+      promptEl.disabled = isBusy;
+      statusEl.textContent = isBusy ? '正在设计并评分，请稍候…' : '';
+    }
+
+    function renderMeta(data) {
+      if (!data || !data.best_candidate) {
+        metaEl.hidden = true;
+        metaEl.innerHTML = '';
+        return;
+      }
+      const c = data.best_candidate;
+      metaEl.hidden = false;
+      metaEl.innerHTML = [
+        `<strong>最近一次最佳候选：</strong> ${c.id || '-'}<br>`,
+        `score: ${Number(c.score ?? 0).toFixed(3)}；round: ${c.round ?? '-'}；total_generated: ${data.total_generated ?? '-'}<br>`,
+        `sequence: <code>${c.sequence || '-'}</code>`
+      ].join('');
+    }
+
+    async function sendMessage(text) {
+      const content = (text ?? promptEl.value).trim();
+      if (!content) return;
+
+      conversation.push({ role: 'user', content });
+      renderConversation();
+      if (!text) promptEl.value = '';
+
+      setBusy(true);
+      try {
+        const resp = await fetch('/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'esm3-protein-design-agent',
+            messages: conversation
+          })
+        });
+
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        const message = data?.choices?.[0]?.message?.content || '收到响应，但未解析到文本内容。';
+        conversation.push({ role: 'assistant', content: message });
+        renderConversation();
+        renderMeta(data);
+      } catch (err) {
+        conversation.push({ role: 'assistant', content: `请求失败：${err.message}` });
+        renderConversation();
+        renderMeta(null);
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    sendBtn.addEventListener('click', () => sendMessage());
+    promptEl.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        sendMessage();
+      }
+    });
+    clearBtn.addEventListener('click', () => {
+      conversation.splice(0, conversation.length, {
+        role: 'assistant',
+        content: '会话已清空。请告诉我你的设计目标，例如：设计 GFP、加入 GSG motif、禁用 C 并迭代 5 轮。'
+      });
+      renderConversation();
+      renderMeta(null);
+      promptEl.focus();
+    });
+
+    for (const btn of quickButtons) {
+      btn.addEventListener('click', () => sendMessage(btn.dataset.q));
+    }
+
+    renderConversation();
+  </script>
 </body>
 </html>
