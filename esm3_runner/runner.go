@@ -22,6 +22,7 @@ type Client struct {
 	model      string
 	pythonPath string
 	scriptDir  string
+	entrypoint string
 	timeoutSec int
 }
 
@@ -54,6 +55,7 @@ func NewClientFromConfig(cfg config.Config) *Client {
 	c.model = firstNonEmpty(cfg.ESM3.Model, os.Getenv("ESM3_MODEL"))
 	c.pythonPath = firstNonEmpty(cfg.ESM3.PythonPath, os.Getenv("ESM3_PYTHON_PATH"), "python3")
 	c.scriptDir = firstNonEmpty(cfg.ESM3.ScriptDir, os.Getenv("ESM3_SCRIPT_DIR"))
+	c.entrypoint = firstNonEmpty(cfg.ESM3.Entrypoint, os.Getenv("ESM3_ENTRYPOINT"))
 	c.timeoutSec = cfg.ESM3.Timeout
 	if c.timeoutSec <= 0 {
 		c.timeoutSec = 120
@@ -133,6 +135,7 @@ func (c *Client) generateByLocalPython(base string, round, n int, requiredMotif,
 	cmd := exec.Command(c.pythonPath, bridgePath)
 	cmd.Env = append(os.Environ(),
 		"ESM3_SCRIPT_DIR="+c.scriptDir,
+		"ESM3_ENTRYPOINT="+c.entrypoint,
 		fmt.Sprintf("ESM3_TIMEOUT=%d", c.timeoutSec),
 	)
 	cmd.Stdin = bytes.NewReader(body)

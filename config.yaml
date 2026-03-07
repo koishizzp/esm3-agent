@@ -12,6 +12,7 @@ esm3:
   timeout: 300
   python_path: "/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python"
   script_dir: "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"
+  entrypoint: ""  # 可选：例如 generate_variants / generate
 
 logging:
   level: "info"  # debug, info, warn, error

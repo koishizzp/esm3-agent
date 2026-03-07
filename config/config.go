@@ -20,6 +20,7 @@ type Config struct {
 		Timeout    int
 		PythonPath string
 		ScriptDir  string
+		Entrypoint string
 	}
 	LLM struct {
 		Provider string
@@ -94,6 +95,8 @@ func Load(path string) (Config, error) {
 				cfg.ESM3.PythonPath = value
 			case "script_dir":
 				cfg.ESM3.ScriptDir = value
+			case "entrypoint":
+				cfg.ESM3.Entrypoint = value
 			}
 		}
 	}

@@ -53,6 +53,7 @@ esm3:
   timeout: 300
   python_path: "/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python"
   script_dir: "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"
+  entrypoint: ""  # 可选，明确指定 esm_wrapper 入口函数名
 ```
 
 或使用环境变量：
@@ -63,8 +64,15 @@ export ESM3_API_KEY="<optional>"
 export ESM3_MODEL="esm3-open"
 export ESM3_PYTHON_PATH="/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python"
 export ESM3_SCRIPT_DIR="/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"
+export ESM3_ENTRYPOINT="generate_variants"   # 可选
 ```
 
+
+
+如果出现 `utils.esm_wrapper.generate_variants not found`：
+
+- 现在桥接器会自动尝试 `generate_variants / generate_sequences / generate / run_generation / design`，以及常见包装类的同名方法。
+- 你也可以在 `esm3.entrypoint`（或 `ESM3_ENTRYPOINT`）里显式指定入口名，避免自动探测歧义。
 如果你希望真实调用 OpenAI 兼容网关（并在后台看到 token 消耗），请先设置：
 
 ```bash
