@@ -1,8 +1,10 @@
 package api_server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -16,15 +18,26 @@ type runner interface {
 }
 
 type Server struct {
-	port     string
-	pipeline runner
+	port          string
+	pipeline      runner
+	httpClient    *http.Client
+	upstreamURL   string
+	upstreamKey   string
+	upstreamModel string
 }
 
 func NewServer(port string, pipeline runner) *Server {
 	if port == "" {
 		port = ":8080"
 	}
-	return &Server{port: port, pipeline: pipeline}
+	return &Server{
+		port:          port,
+		pipeline:      pipeline,
+		httpClient:    &http.Client{Timeout: 60 * time.Second},
+		upstreamURL:   strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")),
+		upstreamKey:   strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
+		upstreamModel: strings.TrimSpace(os.Getenv("OPENAI_MODEL")),
+	}
 }
 
 func (s *Server) Port() string { return s.port }
@@ -35,6 +48,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/v1/models", s.models)
 	mux.HandleFunc("/v1/inference/design", s.design)
 	mux.HandleFunc("/v1/chat/completions", s.chat)
+	mux.HandleFunc("/v1/debug/provider", s.provider)
 	mux.HandleFunc("/", s.web)
 	return http.ListenAndServe(s.port, mux)
 }
@@ -80,6 +94,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	if s.upstreamEnabled() {
+		s.proxyChat(w, r)
+		return
+	}
+
 	var req struct {
 		Messages []struct {
 			Role    string `json:"role"`
@@ -98,6 +118,66 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	respondWithPrompt(s, w, content)
+}
+
+func (s *Server) provider(w http.ResponseWriter, _ *http.Request) {
+	masked := ""
+	if s.upstreamKey != "" {
+		if len(s.upstreamKey) <= 8 {
+			masked = "****"
+		} else {
+			masked = s.upstreamKey[:4] + "..." + s.upstreamKey[len(s.upstreamKey)-4:]
+		}
+	}
+	writeJSON(w, map[string]any{
+		"mode":             map[bool]string{true: "upstream", false: "local-mock"}[s.upstreamEnabled()],
+		"upstream_enabled": s.upstreamEnabled(),
+		"upstream_url":     s.upstreamURL,
+		"upstream_model":   s.upstreamModel,
+		"api_key_masked":   masked,
+	})
+}
+
+func (s *Server) upstreamEnabled() bool {
+	return s.upstreamURL != "" && s.upstreamKey != ""
+}
+
+func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if s.upstreamModel != "" {
+		payload["model"] = s.upstreamModel
+	}
+	patched, _ := json.Marshal(payload)
+
+	upstream := strings.TrimRight(s.upstreamURL, "/") + "/chat/completions"
+	req, err := http.NewRequest(http.MethodPost, upstream, bytes.NewReader(patched))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.upstreamKey)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		http.Error(w, "upstream request failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 func respondWithPrompt(s *Server, w http.ResponseWriter, content string) {
