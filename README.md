@@ -37,6 +37,26 @@ esm3-agent
 
 ## API
 
+### 运行模式（本地 mock / 上游大模型）
+
+默认是本地 mock 设计流程，不会消耗任何外部大模型 token。
+
+如果你希望真实调用 OpenAI 兼容网关（并在后台看到 token 消耗），请先设置：
+
+```bash
+export OPENAI_BASE_URL="https://<your-gateway>/v1"
+export OPENAI_API_KEY="<your_api_key>"
+export OPENAI_MODEL="gpt-5.3-codex"   # 可选，不填则沿用请求里的 model
+```
+
+然后重启服务并检查：
+
+```bash
+curl http://localhost:8080/v1/debug/provider
+```
+
+当 `mode=upstream` 且 `upstream_enabled=true` 时，`POST /v1/chat/completions` 会转发到上游并返回原始响应（含 usage 字段时可直接看到 token 计数）。
+
 ### 0) Web 交互界面（新增）
 
 浏览器打开根路径即可进行多轮对话，不需要手写 curl：
@@ -86,6 +106,8 @@ curl http://localhost:8080/v1/chat/completions \
 ```bash
 http://localhost:8080/v1/chat/completions?q=请自动设计GFP并迭代
 ```
+
+> 注意：GET 仅用于本地快速演示。真正触发上游大模型调用的是 `POST /v1/chat/completions`。
 
 ## 为什么你只看到 `choices`？
 
