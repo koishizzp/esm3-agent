@@ -47,6 +47,8 @@ http://localhost:8080/
 
 页面会持续保留会话上下文，并展示最近一次最佳候选（ID、score、sequence）。
 
+此外页面会自动请求 `POST /v1/inference/design` 获取完整候选 JSON，并提供“跳转查看”与“复制 JSON/序列”能力，避免长序列单行难读。
+
 ### 1) 健康检查
 
 ```bash

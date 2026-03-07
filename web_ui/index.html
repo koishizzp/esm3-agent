@@ -87,6 +87,35 @@
       font-size: .95rem;
       color: #334155;
     }
+    .row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+    .jump-link { font-size: .92rem; }
+    .sequence-box {
+      margin-top: .5rem;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: .5rem;
+      align-items: start;
+    }
+    .sequence-box textarea {
+      min-height: 110px;
+      max-height: 180px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .85rem;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    pre {
+      margin: .5rem 0 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: #f8fafc;
+      border: 1px solid #d7dee7;
+      border-radius: 8px;
+      padding: .7rem;
+      max-height: 340px;
+      overflow: auto;
+      font-size: .82rem;
+    }
   </style>
 </head>
 <body>
@@ -126,6 +155,16 @@
     <div id="meta" class="result-meta" hidden></div>
   </div>
 
+  <div id="fullResult" class="card" hidden>
+    <div class="row">
+      <h2 style="margin:0">完整候选结果</h2>
+      <a id="jumpLink" class="jump-link" href="#fullResult">已自动跳转入口</a>
+      <button id="copyJsonBtn" class="secondary" type="button">复制完整 JSON</button>
+    </div>
+    <p class="muted" style="margin:.45rem 0;">该结果由页面自动调用 <code>POST /v1/inference/design</code> 获取，参数基于你最近一条用户输入推断。</p>
+    <pre id="fullResultJson"></pre>
+  </div>
+
   <script>
     const chatWindow = document.getElementById('chatWindow');
     const promptEl = document.getElementById('prompt');
@@ -134,10 +173,16 @@
     const statusEl = document.getElementById('status');
     const metaEl = document.getElementById('meta');
     const quickButtons = document.querySelectorAll('[data-q]');
+    const fullResultCard = document.getElementById('fullResult');
+    const fullResultJson = document.getElementById('fullResultJson');
+    const copyJsonBtn = document.getElementById('copyJsonBtn');
 
     const conversation = [
       { role: 'assistant', content: '你好，我是 ESM3 设计助手。你可以直接说目标（如 GFP、motif、禁用氨基酸、迭代轮数），我会自动调用设计流程并总结结果。' }
     ];
+
+    let latestSequence = '';
+    let latestFullResult = null;
 
     function renderConversation() {
       chatWindow.innerHTML = '';
@@ -156,19 +201,72 @@
       statusEl.textContent = isBusy ? '正在设计并评分，请稍候…' : '';
     }
 
+    function buildDesignRequest(content) {
+      const text = String(content || '').toLowerCase();
+      const req = {
+        target_protein: 'GFP',
+        num_candidates: 8,
+        rounds: 3,
+        objective: '提高荧光代理分数'
+      };
+      if (text.includes('迭代')) req.rounds = 5;
+      if (text.includes('筛选')) req.num_candidates = 12;
+      if (text.includes('gsg')) req.required_motif = 'GSG';
+      if (text.includes('不能') && text.includes('c')) req.forbidden_aas = 'C';
+      return req;
+    }
+
+    async function fetchFullDesignResult(lastUserContent) {
+      const requestBody = buildDesignRequest(lastUserContent);
+      const resp = await fetch('/v1/inference/design', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+      if (!resp.ok) {
+        throw new Error(`完整结果请求失败 HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      latestFullResult = data;
+      fullResultCard.hidden = false;
+      fullResultJson.textContent = JSON.stringify(data, null, 2);
+    }
+
     function renderMeta(data) {
       if (!data || !data.best_candidate) {
         metaEl.hidden = true;
         metaEl.innerHTML = '';
+        latestSequence = '';
         return;
       }
       const c = data.best_candidate;
+      latestSequence = c.sequence || '';
       metaEl.hidden = false;
       metaEl.innerHTML = [
-        `<strong>最近一次最佳候选：</strong> ${c.id || '-'}<br>`,
-        `score: ${Number(c.score ?? 0).toFixed(3)}；round: ${c.round ?? '-'}；total_generated: ${data.total_generated ?? '-'}<br>`,
-        `sequence: <code>${c.sequence || '-'}</code>`
+        `<div><strong>最近一次最佳候选：</strong> ${c.id || '-'}</div>`,
+        `<div>score: ${Number(c.score ?? 0).toFixed(3)}；round: ${c.round ?? '-'}；total_generated: ${data.total_generated ?? '-'}</div>`,
+        '<div class="sequence-box">',
+        `<textarea readonly id="bestSequenceArea">${latestSequence || '-'}</textarea>`,
+        '<button type="button" id="copySeqBtn" class="secondary">复制序列</button>',
+        '</div>',
+        '<div class="row" style="margin-top:.45rem;">',
+        '<a class="jump-link" href="#fullResult">跳转查看完整候选明细 ↓</a>',
+        '</div>'
       ].join('');
+
+      const copySeqBtn = document.getElementById('copySeqBtn');
+      if (copySeqBtn) {
+        copySeqBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(latestSequence || '');
+            copySeqBtn.textContent = '已复制';
+            setTimeout(() => { copySeqBtn.textContent = '复制序列'; }, 1200);
+          } catch {
+            copySeqBtn.textContent = '复制失败';
+            setTimeout(() => { copySeqBtn.textContent = '复制序列'; }, 1200);
+          }
+        });
+      }
     }
 
     async function sendMessage(text) {
@@ -199,6 +297,14 @@
         conversation.push({ role: 'assistant', content: message });
         renderConversation();
         renderMeta(data);
+
+        try {
+          await fetchFullDesignResult(content);
+        } catch (err) {
+          latestFullResult = null;
+          fullResultCard.hidden = false;
+          fullResultJson.textContent = `无法自动获取完整候选明细：${err.message}`;
+        }
       } catch (err) {
         conversation.push({ role: 'assistant', content: `请求失败：${err.message}` });
         renderConversation();
@@ -221,12 +327,28 @@
       });
       renderConversation();
       renderMeta(null);
+      fullResultCard.hidden = true;
+      fullResultJson.textContent = '';
+      latestFullResult = null;
       promptEl.focus();
     });
 
     for (const btn of quickButtons) {
       btn.addEventListener('click', () => sendMessage(btn.dataset.q));
     }
+
+    copyJsonBtn.addEventListener('click', async () => {
+      const txt = latestFullResult ? JSON.stringify(latestFullResult, null, 2) : fullResultJson.textContent;
+      if (!txt) return;
+      try {
+        await navigator.clipboard.writeText(txt);
+        copyJsonBtn.textContent = '已复制';
+        setTimeout(() => { copyJsonBtn.textContent = '复制完整 JSON'; }, 1200);
+      } catch {
+        copyJsonBtn.textContent = '复制失败';
+        setTimeout(() => { copyJsonBtn.textContent = '复制完整 JSON'; }, 1200);
+      }
+    });
 
     renderConversation();
   </script>
