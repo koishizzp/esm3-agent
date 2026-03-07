@@ -45,6 +45,7 @@ type generateResponse struct {
 	Attempts          []string `json:"attempts"`
 	AvailableSymbols  []string `json:"available_symbols"`
 	GenerationRelated []string `json:"generation_related_symbols"`
+	InstantiateErrors []string `json:"instantiate_errors"`
 	EntrypointUsed    string   `json:"entrypoint_used"`
 }
 
@@ -147,8 +148,8 @@ func (c *Client) generateByLocalPython(base string, round, n int, requiredMotif,
 	if err != nil {
 		return nil, fmt.Errorf("python bridge failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	var parsed generateResponse
-	if err := json.Unmarshal(out, &parsed); err != nil {
+	parsed, err := parseGenerateResponse(out)
+	if err != nil {
 		return nil, fmt.Errorf("parse python output failed: %w output=%s", err, strings.TrimSpace(string(out)))
 	}
 	if parsed.Error != "" {
@@ -170,9 +171,45 @@ func (c *Client) generateByLocalPython(base string, round, n int, requiredMotif,
 			}
 			detail += "; generation_related_symbols=" + strings.Join(parsed.GenerationRelated[:max], ",")
 		}
+		if len(parsed.InstantiateErrors) > 0 {
+			max := len(parsed.InstantiateErrors)
+			if max > 6 {
+				max = 6
+			}
+			detail += "; instantiate_errors=" + strings.Join(parsed.InstantiateErrors[:max], " | ")
+		}
 		return nil, fmt.Errorf("python bridge error: %s", detail)
 	}
 	return cleanVariants(parsed, n, payload.RequiredMotif, forbidden)
+}
+
+func parseGenerateResponse(out []byte) (generateResponse, error) {
+	var parsed generateResponse
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return parsed, fmt.Errorf("empty output")
+	}
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+		return parsed, nil
+	}
+	lines := strings.Split(trimmed, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(line, "{") || !strings.HasSuffix(line, "}") {
+			continue
+		}
+		if err := json.Unmarshal([]byte(line), &parsed); err == nil {
+			return parsed, nil
+		}
+	}
+	start := strings.LastIndex(trimmed, "{")
+	if start >= 0 {
+		candidate := trimmed[start:]
+		if err := json.Unmarshal([]byte(candidate), &parsed); err == nil {
+			return parsed, nil
+		}
+	}
+	return parsed, fmt.Errorf("no json object found in python output")
 }
 
 func cleanVariants(parsed generateResponse, n int, requiredMotif, forbidden string) ([]string, error) {
