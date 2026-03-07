@@ -60,8 +60,40 @@ def call_with_flexible_kwargs(fn: Callable[..., Any], payload: dict):
     return fn(**kwargs)
 
 
-def build_candidates(module: Any, entrypoint: str):
+def instantiate_with_flexible_kwargs(cls_obj: Any, module: Any, payload: dict):
+    aliases = {
+        "model": ["model", "model_name", "name"],
+        "device": ["device", "torch_device"],
+        "snapshot_dir": ["snapshot_dir", "snapshot", "esm3_snapshot_dir", "weights_dir"],
+        "source_path": ["source_path", "esm_source_path", "repo_path"],
+        "data_path": ["data_path", "local_data_path"],
+    }
+    values = {
+        "model": os.environ.get("ESM3_MODEL", "").strip() or payload.get("model") or "",
+        "device": os.environ.get("ESM3_DEVICE", "").strip(),
+        "snapshot_dir": getattr(module, "ESM3_SNAPSHOT_DIR", None),
+        "source_path": getattr(module, "ESM_SOURCE_PATH", None),
+        "data_path": getattr(module, "LOCAL_DATA_PATH", None),
+    }
+
+    sig = inspect.signature(cls_obj)
+    kwargs = {}
+    for p_name, p in sig.parameters.items():
+        if p_name == "self" or p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        for logical, keys in aliases.items():
+            if p_name in keys:
+                val = values[logical]
+                if val is not None and not (isinstance(val, str) and not val):
+                    kwargs[p_name] = val
+                break
+
+    return cls_obj(**kwargs)
+
+
+def build_candidates(module: Any, entrypoint: str, payload: dict):
     candidates: list[tuple[str, Callable[..., Any]]] = []
+    instantiate_errors: list[str] = []
 
     if entrypoint and hasattr(module, entrypoint):
         obj = getattr(module, entrypoint)
@@ -81,16 +113,21 @@ def build_candidates(module: Any, entrypoint: str):
                 continue
             instance = None
             ctor_attempts = [
+                ("flex",),
                 (),
                 (getattr(module, "ESM3_SNAPSHOT_DIR", None),),
                 (getattr(module, "ESM_SOURCE_PATH", None),),
             ]
             for args in ctor_attempts:
-                args = tuple(a for a in args if a is not None)
                 try:
-                    instance = cls_obj(*args)
+                    if args == ("flex",):
+                        instance = instantiate_with_flexible_kwargs(cls_obj, module, payload)
+                    else:
+                        args = tuple(a for a in args if a is not None)
+                        instance = cls_obj(*args)
                     break
-                except Exception:
+                except Exception as e:  # noqa: BLE001
+                    instantiate_errors.append(f"{cls_name} ctor args={args}: {e}")
                     continue
             if instance is None:
                 continue
@@ -117,12 +154,16 @@ def build_candidates(module: Any, entrypoint: str):
         if not method_names:
             continue
         instance = None
-        for args in [(), (getattr(module, "ESM3_SNAPSHOT_DIR", None),)]:
-            args = tuple(a for a in args if a is not None)
+        for args in [("flex",), (), (getattr(module, "ESM3_SNAPSHOT_DIR", None),)]:
             try:
-                instance = obj(*args)
+                if args == ("flex",):
+                    instance = instantiate_with_flexible_kwargs(obj, module, payload)
+                else:
+                    args = tuple(a for a in args if a is not None)
+                    instance = obj(*args)
                 break
-            except Exception:
+            except Exception as e:  # noqa: BLE001
+                instantiate_errors.append(f"{attr_name} ctor args={args}: {e}")
                 continue
         if instance is None:
             continue
@@ -139,7 +180,7 @@ def build_candidates(module: Any, entrypoint: str):
             continue
         seen.add(name)
         out.append((name, fn))
-    return out
+    return out, instantiate_errors
 
 
 def main():
@@ -161,7 +202,7 @@ def main():
         print(json.dumps({"error": f"cannot import utils.esm_wrapper from script_dir: {e}"}))
         return
 
-    candidates = build_candidates(module, entrypoint)
+    candidates, instantiate_errors = build_candidates(module, entrypoint, payload)
     if not candidates:
         available = [x for x in dir(module) if not x.startswith("_")][:80]
         generation_related = [x for x in available if "generate" in x.lower() or "design" in x.lower() or "esm3" in x.lower()]
@@ -171,6 +212,7 @@ def main():
                     "error": "no callable generation entry found in utils.esm_wrapper",
                     "available_symbols": available,
                     "generation_related_symbols": generation_related,
+                    "instantiate_errors": instantiate_errors[:12],
                 }
             )
         )
