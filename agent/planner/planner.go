@@ -25,6 +25,6 @@ func (p *Planner) Build(req protein_pipeline.DesignRequest) protein_pipeline.Des
 	return protein_pipeline.DesignPlan{
 		Strategy:       strategy,
 		MutationPolicy: "single + double point mutations with motif constraints",
-		ScoringFocus:   []string{"stability", "fluorescence_proxy", "composition_penalty"},
+		ScoringFocus:   []string{"stability", "fluorescence_proxy", "composition_penalty", "constraint_penalty", "length_penalty", "explainable_weighted_score"},
 	}
 }

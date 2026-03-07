@@ -13,6 +13,14 @@ type Config struct {
 		Host string
 		Port int
 	}
+	ESM3 struct {
+		Endpoint   string
+		APIKey     string
+		Model      string
+		Timeout    int
+		PythonPath string
+		ScriptDir  string
+	}
 	LLM struct {
 		Provider string
 		BaseURL  string
@@ -69,6 +77,23 @@ func Load(path string) (Config, error) {
 				cfg.LLM.APIKey = value
 			case "model":
 				cfg.LLM.Model = value
+			}
+		case "esm3":
+			switch key {
+			case "endpoint":
+				cfg.ESM3.Endpoint = value
+			case "api_key":
+				cfg.ESM3.APIKey = value
+			case "model":
+				cfg.ESM3.Model = value
+			case "timeout":
+				if t, err := strconv.Atoi(value); err == nil {
+					cfg.ESM3.Timeout = t
+				}
+			case "python_path":
+				cfg.ESM3.PythonPath = value
+			case "script_dir":
+				cfg.ESM3.ScriptDir = value
 			}
 		}
 	}

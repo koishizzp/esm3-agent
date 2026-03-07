@@ -37,9 +37,33 @@ esm3-agent
 
 ## API
 
-### 运行模式（本地 mock / 上游大模型）
+### 运行模式（真实 ESM3 / 上游大模型）
 
-默认是本地 mock 设计流程，不会消耗任何外部大模型 token。
+默认只允许真实 ESM3 推理，不再允许自动回退 mock。
+
+优先使用 `esm3.endpoint`（HTTP 服务）；若为空，则使用本地 `python_path + script_dir` 调用你部署的 ESM3 环境。若两者都不可用，接口会直接报错。
+
+先配置真实 ESM3（与你当前服务器部署一致）：
+
+```yaml
+esm3:
+  endpoint: ""   # 如果你已有 HTTP 服务就填；否则留空
+  api_key: ""
+  model: "esm3-open"
+  timeout: 300
+  python_path: "/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python"
+  script_dir: "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"
+```
+
+或使用环境变量：
+
+```bash
+export ESM3_ENDPOINT="http://127.0.0.1:8000/v1/esm3/generate"   # 可选
+export ESM3_API_KEY="<optional>"
+export ESM3_MODEL="esm3-open"
+export ESM3_PYTHON_PATH="/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python"
+export ESM3_SCRIPT_DIR="/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction"
+```
 
 如果你希望真实调用 OpenAI 兼容网关（并在后台看到 token 消耗），请先设置：
 
@@ -144,4 +168,26 @@ http://<server_ip>:8080/health
 
 ## 说明
 
-当前 `esm3_runner` 为可替换执行层（默认提供 mock 变体生成逻辑），后续可以直接接入真实 ESM3 推理脚本或服务。
+当前 `esm3_runner` 为严格真实推理执行层：必须接通 HTTP ESM3 或本地 Python ESM3；失败会直接返回错误，避免误用 mock 结果。
+
+
+## 评分与优化策略（科学严谨性说明）
+
+当前评分函数采用可解释的加权模型（每条候选会返回 metrics 明细）：
+
+- 正向项：
+  - `stability_component`：疏水比例接近 0.35 时更高。
+  - `fluor_component`：G/S 比例提升会增加荧光代理得分。
+- 负向项：
+  - `charge_penalty`：过高带电氨基酸比例触发惩罚。
+  - `length_penalty`：超出 `min_length/max_length` 时惩罚。
+  - `motif_penalty`：不满足 `required_motif` 时惩罚。
+  - `forbidden_penalty`：包含 `forbidden_aas` 时惩罚。
+
+总分公式：
+
+```
+score = +0.45*stability +0.75*fluor -0.55*charge -0.30*length -0.35*motif -0.40*forbidden
+```
+
+优化策略为“多轮迭代 + best seed 回灌”：每轮基于当前最优序列再生成新候选，持续提高目标分数并保持约束。
