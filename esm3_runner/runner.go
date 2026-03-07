@@ -41,7 +41,10 @@ type generateResponse struct {
 	Data      []struct {
 		Sequence string `json:"sequence"`
 	} `json:"data"`
-	Error string `json:"error"`
+	Error            string   `json:"error"`
+	Attempts         []string `json:"attempts"`
+	AvailableSymbols []string `json:"available_symbols"`
+	EntrypointUsed   string   `json:"entrypoint_used"`
 }
 
 func NewClient() *Client {
@@ -148,7 +151,18 @@ func (c *Client) generateByLocalPython(base string, round, n int, requiredMotif,
 		return nil, fmt.Errorf("parse python output failed: %w output=%s", err, strings.TrimSpace(string(out)))
 	}
 	if parsed.Error != "" {
-		return nil, fmt.Errorf("python bridge error: %s", parsed.Error)
+		detail := parsed.Error
+		if len(parsed.Attempts) > 0 {
+			detail += "; attempts=" + strings.Join(parsed.Attempts, " | ")
+		}
+		if len(parsed.AvailableSymbols) > 0 {
+			max := len(parsed.AvailableSymbols)
+			if max > 30 {
+				max = 30
+			}
+			detail += "; available_symbols=" + strings.Join(parsed.AvailableSymbols[:max], ",")
+		}
+		return nil, fmt.Errorf("python bridge error: %s", detail)
 	}
 	return cleanVariants(parsed, n, payload.RequiredMotif, forbidden)
 }

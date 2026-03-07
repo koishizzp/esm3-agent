@@ -73,6 +73,7 @@ export ESM3_ENTRYPOINT="generate_variants"   # 可选
 
 - 现在桥接器会自动尝试 `generate_variants / generate_sequences / generate / run_generation / design`，以及常见包装类的同名方法。
 - 你也可以在 `esm3.entrypoint`（或 `ESM3_ENTRYPOINT`）里显式指定入口名，避免自动探测歧义。
+- 失败时 `POST /v1/inference/design` 返回的错误文本会附带 `attempts=` 与 `available_symbols=`，可直接据此定位入口函数名。
 如果你希望真实调用 OpenAI 兼容网关（并在后台看到 token 消耗），请先设置：
 
 ```bash
