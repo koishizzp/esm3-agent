@@ -1,16 +1,70 @@
 """Centralized configuration for the protein design agent."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
+import os
+from pathlib import Path
 import sys
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
+def _load_env_file(path: str = ".env") -> dict[str, str]:
+    env: dict[str, str] = {}
+    file_path = Path(path)
+    if not file_path.exists():
+        return env
+
+    for raw_line in file_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        env[key] = value
+    return env
+
+
+def _env_source() -> dict[str, str]:
+    data = _load_env_file()
+    data.update(os.environ)
+    return data
+
+
+def _env_get(data: dict[str, str], name: str, default: str | None = None) -> str | None:
+    return data.get(name, default)
+
+
+def _to_bool(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    lowered = value.strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _to_int(value: str | None, default: int) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _to_optional_str(value: str | None, default: str | None = None) -> str | None:
+    if value is None:
+        return default
+    value = value.strip()
+    return value if value else None
+
+
+@dataclass(slots=True)
+class Settings:
     """Runtime settings loaded from environment variables."""
-
-    model_config = SettingsConfigDict(env_prefix="PROTEIN_AGENT_", env_file=".env", extra="ignore")
 
     app_name: str = "ESM3 Protein Agent"
     log_level: str = "INFO"
@@ -28,7 +82,7 @@ class Settings(BaseSettings):
     esm3_project_dir: str | None = None
     esm3_weights_dir: str | None = None
     esm3_data_dir: str | None = None
-    esm3_model_name: str = "esm3-open"
+    esm3_model_name: str = "esm3_sm_open_v1"
     esm3_device: str | None = None
     esm3_generate_entrypoint: str | None = None
     esm3_mutate_entrypoint: str | None = None
@@ -42,11 +96,61 @@ class Settings(BaseSettings):
     default_candidates: int = 8
     default_mutations_per_round: int = 4
     default_patience: int = 8
-    max_iterations: int = Field(default=100, le=100)
+    max_iterations: int = 100
 
     use_gpu: bool = True
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        data = _env_source()
+        max_iterations = min(_to_int(_env_get(data, "PROTEIN_AGENT_MAX_ITERATIONS"), 100), 100)
+        return cls(
+            app_name=_env_get(data, "PROTEIN_AGENT_APP_NAME", cls.app_name) or cls.app_name,
+            log_level=_env_get(data, "PROTEIN_AGENT_LOG_LEVEL", cls.log_level) or cls.log_level,
+            llm_model=_env_get(data, "PROTEIN_AGENT_LLM_MODEL", cls.llm_model) or cls.llm_model,
+            openai_api_key=_to_optional_str(_env_get(data, "PROTEIN_AGENT_OPENAI_API_KEY")),
+            openai_base_url=_to_optional_str(_env_get(data, "PROTEIN_AGENT_OPENAI_BASE_URL")),
+            esm3_backend=_env_get(data, "PROTEIN_AGENT_ESM3_BACKEND", cls.esm3_backend) or cls.esm3_backend,
+            esm3_server_url=_to_optional_str(
+                _env_get(data, "PROTEIN_AGENT_ESM3_SERVER_URL"), cls.esm3_server_url
+            ),
+            esm3_server_api_key=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_SERVER_API_KEY")),
+            esm3_server_headers_json=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_SERVER_HEADERS_JSON")),
+            esm3_python_path=_env_get(data, "PROTEIN_AGENT_ESM3_PYTHON_PATH", cls.esm3_python_path)
+            or cls.esm3_python_path,
+            esm3_root=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_ROOT")),
+            esm3_project_dir=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_PROJECT_DIR")),
+            esm3_weights_dir=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_WEIGHTS_DIR")),
+            esm3_data_dir=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_DATA_DIR")),
+            esm3_model_name=_env_get(data, "PROTEIN_AGENT_ESM3_MODEL_NAME", cls.esm3_model_name)
+            or cls.esm3_model_name,
+            esm3_device=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_DEVICE")),
+            esm3_generate_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_GENERATE_ENTRYPOINT")),
+            esm3_mutate_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_MUTATE_ENTRYPOINT")),
+            esm3_structure_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_STRUCTURE_ENTRYPOINT")),
+            esm3_extra_pythonpath=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_EXTRA_PYTHONPATH")),
+            request_timeout=_to_int(_env_get(data, "PROTEIN_AGENT_REQUEST_TIMEOUT"), cls.request_timeout),
+            allow_generated_python=_to_bool(
+                _env_get(data, "PROTEIN_AGENT_ALLOW_GENERATED_PYTHON"), cls.allow_generated_python
+            ),
+            generated_python_model=_to_optional_str(_env_get(data, "PROTEIN_AGENT_GENERATED_PYTHON_MODEL")),
+            generated_python_timeout=_to_int(
+                _env_get(data, "PROTEIN_AGENT_GENERATED_PYTHON_TIMEOUT"), cls.generated_python_timeout
+            ),
+            default_candidates=_to_int(
+                _env_get(data, "PROTEIN_AGENT_DEFAULT_CANDIDATES"), cls.default_candidates
+            ),
+            default_mutations_per_round=_to_int(
+                _env_get(data, "PROTEIN_AGENT_DEFAULT_MUTATIONS_PER_ROUND"), cls.default_mutations_per_round
+            ),
+            default_patience=_to_int(
+                _env_get(data, "PROTEIN_AGENT_DEFAULT_PATIENCE"), cls.default_patience
+            ),
+            max_iterations=max_iterations,
+            use_gpu=_to_bool(_env_get(data, "PROTEIN_AGENT_USE_GPU"), cls.use_gpu),
+        )
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    return Settings.from_env()

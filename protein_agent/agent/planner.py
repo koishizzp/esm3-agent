@@ -5,7 +5,10 @@ import json
 import logging
 from typing import Any
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except Exception:  # noqa: BLE001
+    OpenAI = None
 
 from protein_agent.config.settings import Settings
 
@@ -19,7 +22,10 @@ class LLMPlanner:
         self.settings = settings
         self.client = None
         if settings.openai_api_key:
-            self.client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+            if OpenAI is None:
+                LOGGER.warning("openai package unavailable; using deterministic fallback planner.")
+            else:
+                self.client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
 
     def plan(self, task: str) -> dict[str, Any]:
         if not self.client:
