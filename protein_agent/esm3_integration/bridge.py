@@ -424,21 +424,51 @@ def build_local_open_small_model(values: dict[str, Any]) -> Any:
         raise RuntimeError(f"failed to import local ESM3 components: {exc}") from exc
 
     source_root = Path(values.get("source_path") or "") if values.get("source_path") else None
-    previous_cwd = os.getcwd()
+    weights_dir = values.get("weights_dir") or ""
+    data_dir = values.get("data_dir") or ""
     previous_provider = os.environ.get("INFRA_PROVIDER")
+    previous_source = os.environ.get("ESM_SOURCE_PATH")
+    previous_snapshot = os.environ.get("ESM3_SNAPSHOT_DIR")
+    previous_data = os.environ.get("LOCAL_DATA_PATH")
     try:
         if source_root is not None and source_root.exists():
             os.chdir(source_root)
         os.environ["INFRA_PROVIDER"] = previous_provider or "local"
+        if source_root is not None and source_root.exists():
+            os.environ["ESM_SOURCE_PATH"] = str(source_root)
+        if weights_dir:
+            os.environ["ESM3_SNAPSHOT_DIR"] = str(weights_dir)
+        if data_dir:
+            os.environ["LOCAL_DATA_PATH"] = str(data_dir)
         tokenizers = get_esm3_model_tokenizers(canonical)
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"failed to load tokenizers from local repo/data: {exc}") from exc
     finally:
-        os.chdir(previous_cwd)
         if previous_provider is None:
             os.environ.pop("INFRA_PROVIDER", None)
         else:
             os.environ["INFRA_PROVIDER"] = previous_provider
+        if previous_source is None:
+            os.environ.pop("ESM_SOURCE_PATH", None)
+        else:
+            os.environ["ESM_SOURCE_PATH"] = previous_source
+        if previous_snapshot is None:
+            os.environ.pop("ESM3_SNAPSHOT_DIR", None)
+        else:
+            os.environ["ESM3_SNAPSHOT_DIR"] = previous_snapshot
+        if previous_data is None:
+            os.environ.pop("LOCAL_DATA_PATH", None)
+        else:
+            os.environ["LOCAL_DATA_PATH"] = previous_data
+
+    if source_root is not None and source_root.exists():
+        os.chdir(source_root)
+        os.environ["ESM_SOURCE_PATH"] = str(source_root)
+    if weights_dir:
+        os.environ["ESM3_SNAPSHOT_DIR"] = str(weights_dir)
+    if data_dir:
+        os.environ["LOCAL_DATA_PATH"] = str(data_dir)
+    os.environ.setdefault("INFRA_PROVIDER", "local")
 
     def structure_encoder_fn(device: Any) -> Any:
         model = StructureTokenEncoder(
