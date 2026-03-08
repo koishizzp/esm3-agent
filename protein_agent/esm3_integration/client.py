@@ -119,8 +119,9 @@ class ESM3Client:
         )
 
     def _call(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+        backends = self._backend_order()
         errors: list[str] = []
-        for backend in self._backend_order():
+        for backend in backends:
             try:
                 if backend == "http":
                     return self._call_http(operation, payload)
@@ -132,6 +133,10 @@ class ESM3Client:
                 detail = f"{backend}: {exc}"
                 errors.append(detail)
                 LOGGER.warning("ESM3 backend '%s' failed: %s", backend, exc)
+
+        if len(backends) == 1 and len(errors) == 1:
+            _, _, detail = errors[0].partition(": ")
+            raise RuntimeError(detail or errors[0])
 
         joined = " | ".join(errors) if errors else "no backend available"
         raise RuntimeError(f"ESM3 {operation} failed across backends: {joined}")
@@ -200,17 +205,54 @@ class ESM3Client:
                 raise RuntimeError("PROTEIN_AGENT_ESM3_SERVER_HEADERS_JSON must decode to an object")
             headers.update({str(k): str(v) for k, v in extra.items()})
 
-        resp = self.http.post(
-            f"{self.server_url}{path}",
-            json=payload,
-            headers=headers,
-            timeout=self.settings.request_timeout,
-        )
-        resp.raise_for_status()
+        url = f"{self.server_url}{path}"
+        try:
+            resp = self.http.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=self.settings.request_timeout,
+            )
+            resp.raise_for_status()
+        except requests.HTTPError as exc:
+            raise RuntimeError(self._format_http_error(resp)) from exc
+        except requests.RequestException as exc:
+            raise RuntimeError(f"HTTP request to {url} failed: {exc}") from exc
+
         data = resp.json()
         if isinstance(data, dict) and data.get("error"):
             raise RuntimeError(str(data["error"]))
         return data
+
+    def _format_http_error(self, response: requests.Response) -> str:
+        detail = self._extract_http_error_detail(response)
+        status = f"HTTP {response.status_code}"
+        location = response.url or self.server_url or "ESM3 server"
+        if detail:
+            return f"{status} from {location}: {detail}"
+        reason = (response.reason or "request failed").strip()
+        return f"{status} from {location}: {reason}"
+
+    def _extract_http_error_detail(self, response: requests.Response) -> str | None:
+        text = (response.text or "").strip()
+        if not text:
+            return None
+
+        try:
+            data = response.json()
+        except ValueError:
+            return text[:400]
+
+        if isinstance(data, dict):
+            for key in ("detail", "error", "message"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+                if value:
+                    return json.dumps(value, ensure_ascii=False)[:400]
+            return json.dumps(data, ensure_ascii=False)[:400]
+
+        return json.dumps(data, ensure_ascii=False)[:400]
 
     def _call_local_bridge(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         python_path = (self.settings.esm3_python_path or "").strip()
