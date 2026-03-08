@@ -32,7 +32,7 @@ AGENT_LOG="${PROTEIN_AGENT_API_LOG:-logs/protein_agent.log}"
 
 PYTHON_BIN="${PROTEIN_AGENT_ESM3_PYTHON_PATH:-python3}"
 SMOKE_SEQUENCE="${PROTEIN_AGENT_SMOKE_SEQUENCE:-MSKGEELFTGVV}"
-SMOKE_TASK="${PROTEIN_AGENT_SMOKE_TASK:-请自动设计 GFP 并迭代优化}"
+SMOKE_TASK="${PROTEIN_AGENT_SMOKE_TASK:-Automatically design GFP and iteratively optimize it}"
 SMOKE_ITERATIONS="${PROTEIN_AGENT_SMOKE_ITERATIONS:-1}"
 SMOKE_CANDIDATES="${PROTEIN_AGENT_SMOKE_CANDIDATES:-2}"
 
@@ -93,9 +93,25 @@ PY
 post_json() {
   local url="$1"
   local data="$2"
-  curl -fsS "$url" \
+  local response_file
+  response_file="$(mktemp)"
+  local http_code
+  http_code="$(curl -sS -o "$response_file" -w '%{http_code}' "$url" \
     -H 'Content-Type: application/json' \
-    -d "$data"
+    -d "$data")"
+  local body
+  body="$(cat "$response_file")"
+  rm -f "$response_file"
+
+  if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+    echo "HTTP ${http_code} from ${url}" >&2
+    if [[ -n "$body" ]]; then
+      echo "$body" >&2
+    fi
+    return 1
+  fi
+
+  printf '%s' "$body"
 }
 
 trap 'echo; echo "冒烟测试失败。"; show_recent_logs' ERR

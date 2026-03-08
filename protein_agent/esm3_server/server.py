@@ -118,6 +118,7 @@ def generate_sequence(req: GenerateRequest) -> dict[str, Any]:
     try:
         return {"sequences": SERVICE.generate(req.prompt, req.num_candidates, req.temperature)}
     except RuntimeError as exc:
+        LOGGER.exception("ESM3 generate_sequence failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -130,6 +131,7 @@ def mutate_sequence(req: MutateRequest) -> dict[str, Any]:
             "sequences": SERVICE.mutate(req.sequence, req.num_mutations, req.num_candidates)
         }
     except RuntimeError as exc:
+        LOGGER.exception("ESM3 mutate_sequence failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -140,4 +142,5 @@ def predict_structure(req: StructureRequest) -> dict[str, Any]:
     try:
         return SERVICE.predict_structure(req.sequence)
     except RuntimeError as exc:
+        LOGGER.exception("ESM3 predict_structure failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

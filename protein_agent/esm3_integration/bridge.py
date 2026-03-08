@@ -440,7 +440,7 @@ def build_local_open_small_model(values: dict[str, Any]) -> Any:
         else:
             os.environ["INFRA_PROVIDER"] = previous_provider
 
-    def structure_encoder_fn() -> Any:
+    def structure_encoder_fn(device: Any) -> Any:
         model = StructureTokenEncoder(
             d_model=1024,
             n_heads=1,
@@ -450,16 +450,22 @@ def build_local_open_small_model(values: dict[str, Any]) -> Any:
             n_codes=4096,
         )
         model.load_state_dict(torch.load(files["structure_encoder"], map_location="cpu"))
+        model = model.to(device)
+        model.eval()
         return model
 
-    def structure_decoder_fn() -> Any:
+    def structure_decoder_fn(device: Any) -> Any:
         model = StructureTokenDecoder(d_model=1280, n_heads=20, n_layers=30)
         model.load_state_dict(torch.load(files["structure_decoder"], map_location="cpu"))
+        model = model.to(device)
+        model.eval()
         return model
 
-    def function_decoder_fn() -> Any:
+    def function_decoder_fn(device: Any) -> Any:
         model = FunctionTokenDecoder(d_model=1536, n_heads=24, n_layers=3)
         model.load_state_dict(torch.load(files["function_decoder"], map_location="cpu"))
+        model = model.to(device)
+        model.eval()
         return model
 
     model = ESM3(
