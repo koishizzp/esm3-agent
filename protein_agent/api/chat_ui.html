@@ -1,0 +1,972 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESM3 Chat Workspace</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --panel-solid: #ffffff;
+      --panel: rgba(255, 255, 255, 0.88);
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: rgba(148, 163, 184, 0.22);
+      --border-strong: rgba(148, 163, 184, 0.35);
+      --primary: #2563eb;
+      --primary-strong: #1d4ed8;
+      --primary-soft: rgba(37, 99, 235, 0.12);
+      --success: #16a34a;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --shadow: 0 18px 45px rgba(15, 23, 42, 0.09);
+      --shadow-soft: 0 6px 20px rgba(15, 23, 42, 0.05);
+      --radius-xl: 24px;
+      --radius-lg: 18px;
+      --radius-md: 14px;
+      --code-bg: #0f172a;
+      --code-text: #dbeafe;
+      --diff-same: rgba(148, 163, 184, 0.08);
+      --diff-change: rgba(37, 99, 235, 0.18);
+      --diff-insert: rgba(22, 163, 74, 0.18);
+      --diff-delete: rgba(220, 38, 38, 0.16);
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #08111f;
+      --panel-solid: #0f172a;
+      --panel: rgba(15, 23, 42, 0.82);
+      --text: #e5eefc;
+      --muted: #9fb0ca;
+      --border: rgba(148, 163, 184, 0.18);
+      --border-strong: rgba(148, 163, 184, 0.32);
+      --primary: #60a5fa;
+      --primary-strong: #93c5fd;
+      --primary-soft: rgba(96, 165, 250, 0.16);
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #f87171;
+      --shadow: 0 18px 45px rgba(2, 6, 23, 0.42);
+      --shadow-soft: 0 6px 20px rgba(2, 6, 23, 0.3);
+      --code-bg: #020617;
+      --code-text: #dbeafe;
+      --diff-same: rgba(148, 163, 184, 0.12);
+      --diff-change: rgba(96, 165, 250, 0.22);
+      --diff-insert: rgba(34, 197, 94, 0.2);
+      --diff-delete: rgba(248, 113, 113, 0.2);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(14, 165, 233, 0.1), transparent 22%),
+        linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+      transition: background .2s ease, color .2s ease;
+    }
+
+    :root[data-theme="dark"] body {
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.2), transparent 26%),
+        radial-gradient(circle at top right, rgba(14, 165, 233, 0.16), transparent 22%),
+        linear-gradient(180deg, #07101e 0%, var(--bg) 100%);
+    }
+    .workspace {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 380px;
+      gap: 18px;
+      padding: 18px;
+    }
+    .sidebar, .chat-shell, .inspector {
+      min-height: calc(100vh - 36px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .sidebar {
+      display: grid;
+      grid-template-rows: auto auto auto auto 1fr auto;
+      background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(245,248,255,0.94) 100%);
+    }
+
+    :root[data-theme="dark"] .sidebar,
+    :root[data-theme="dark"] .chat-shell,
+    :root[data-theme="dark"] .inspector {
+      background: linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(10,18,34,0.95) 100%);
+    }
+    .sidebar-header, .nav-section, .sidebar-footer, .topbar, .context-bar, .composer, .inspector-section {
+      padding-left: 22px;
+      padding-right: 22px;
+    }
+    .sidebar-header {
+      padding-top: 24px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: var(--primary-soft);
+      color: var(--primary-strong);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .theme-btn {
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.85);
+      color: var(--text);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 10px;
+      cursor: pointer;
+      box-shadow: var(--shadow-soft);
+    }
+
+    :root[data-theme="dark"] .theme-btn,
+    :root[data-theme="dark"] .chip,
+    :root[data-theme="dark"] button.secondary,
+    :root[data-theme="dark"] button.ghost,
+    :root[data-theme="dark"] textarea,
+    :root[data-theme="dark"] input[type="number"],
+    :root[data-theme="dark"] .status-pill,
+    :root[data-theme="dark"] .hint-card,
+    :root[data-theme="dark"] .nav-link,
+    :root[data-theme="dark"] .metric-card,
+    :root[data-theme="dark"] .record-card,
+    :root[data-theme="dark"] .recent-item,
+    :root[data-theme="dark"] .diff-wrap {
+      background: rgba(15,23,42,0.88);
+    }
+    .brand-title {
+      margin: 14px 0 8px;
+      font-size: 26px;
+      line-height: 1.15;
+    }
+    .brand-subtitle, .panel-desc, .topbar-subtitle, .context-note, .sidebar-footer, .record-meta, .metric-label, .status-line {
+      color: var(--muted);
+    }
+    .brand-subtitle, .sidebar-footer, .record-meta, .empty-state, .nav-link span, .hint-card p { line-height: 1.55; }
+    .nav-section { padding-top: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+    .section-label {
+      margin: 0 0 12px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .status-stack, .link-stack, .hint-stack, .records, .recent-list { display: grid; gap: 10px; }
+    .status-pill, .hint-card, .nav-link, .metric-card, .record-card, .recent-item, .diff-wrap {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.86);
+      box-shadow: var(--shadow-soft);
+    }
+    .status-pill {
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-dot {
+      width: 10px; height: 10px; border-radius: 999px; background: #94a3b8; flex: 0 0 auto;
+    }
+    .status-dot.ok { background: var(--success); }
+    .status-dot.warn { background: var(--warning); }
+    .status-dot.error { background: var(--danger); }
+    .status-text strong, .hint-card strong, .nav-link strong { display: block; }
+    .status-text strong, .hint-card strong, .record-card strong { font-size: 14px; margin-bottom: 4px; }
+    .status-text span, .nav-link span, .hint-card p { font-size: 12px; }
+    .nav-link { display: block; padding: 12px 14px; color: var(--text); text-decoration: none; }
+    .nav-link:hover { border-color: var(--border-strong); }
+    .hint-card, .recent-item { padding: 12px 14px; }
+    .recent-item {
+      cursor: pointer;
+      text-align: left;
+      color: var(--text);
+      font: inherit;
+    }
+    .recent-item:hover { border-color: var(--border-strong); }
+    .recent-item .recent-meta {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 6px;
+      line-height: 1.45;
+    }
+    .empty-small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .chat-shell {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,251,255,0.96) 100%);
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-top: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-title { margin: 0; font-size: 20px; }
+    .topbar-subtitle { margin: 4px 0 0; font-size: 13px; }
+    .topbar-actions, .quick-actions, .composer-row, .sequence-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.85);
+      padding: 8px 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .chip code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text);
+      background: rgba(148,163,184,0.12);
+      border-radius: 8px;
+      padding: 2px 6px;
+    }
+    .context-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(248, 250, 252, 0.7);
+    }
+    .context-note { font-size: 13px; }
+    .context-seq {
+      max-width: 54ch;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text);
+      background: rgba(37, 99, 235, 0.08);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+    .chat-window {
+      overflow: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      min-height: 420px;
+      max-height: calc(100vh - 280px);
+      background:
+        radial-gradient(circle at top, rgba(37, 99, 235, 0.05), transparent 26%),
+        linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(248,251,255,0.78) 100%);
+    }
+
+    :root[data-theme="dark"] .chat-window {
+      background:
+        radial-gradient(circle at top, rgba(37, 99, 235, 0.12), transparent 24%),
+        linear-gradient(180deg, rgba(15,23,42,0.4) 0%, rgba(10,18,34,0.72) 100%);
+    }
+    .msg-row {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .msg-row.user { grid-template-columns: minmax(0, 1fr) 42px; }
+    .msg-row.user .avatar { order: 2; }
+    .msg-row.user .bubble-wrap { order: 1; align-items: flex-end; }
+    .avatar {
+      width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center;
+      font-size: 18px; font-weight: 700; color: #fff;
+      background: linear-gradient(135deg, #1d4ed8 0%, #60a5fa 100%);
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.24);
+    }
+    .msg-row.assistant .avatar {
+      background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.18);
+    }
+    .bubble-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .msg-meta { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; padding: 0 6px; }
+    .bubble {
+      max-width: min(820px, 100%);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 14px 16px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.65;
+      background: rgba(255,255,255,0.86);
+      box-shadow: var(--shadow-soft);
+    }
+
+    :root[data-theme="dark"] .bubble { background: rgba(15,23,42,0.82); }
+    .msg-row.user .bubble {
+      background: linear-gradient(180deg, rgba(219,234,254,0.95) 0%, rgba(219,234,254,0.82) 100%);
+      border-color: rgba(96, 165, 250, 0.45);
+    }
+    .composer {
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+      padding-bottom: 20px;
+      background: rgba(255,255,255,0.94);
+      display: grid;
+      gap: 12px;
+    }
+
+    :root[data-theme="dark"] .composer,
+    :root[data-theme="dark"] .context-bar {
+      background: rgba(15,23,42,0.72);
+    }
+    textarea, input[type="number"] {
+      width: 100%;
+      border: 1px solid rgba(148,163,184,0.38);
+      border-radius: 16px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      padding: 12px 14px;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    textarea:focus, input[type="number"]:focus {
+      outline: none;
+      border-color: rgba(37,99,235,0.55);
+      box-shadow: 0 0 0 4px rgba(37,99,235,0.08);
+    }
+    textarea { min-height: 108px; resize: vertical; line-height: 1.6; }
+    .composer-grid, .metric-grid { display: grid; gap: 10px; }
+    .composer-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+    .composer-row { justify-content: space-between; }
+    .toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    button {
+      border: none;
+      border-radius: 14px;
+      background: var(--primary);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      padding: 11px 16px;
+      cursor: pointer;
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.22);
+      transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 16px 28px rgba(37, 99, 235, 0.24); }
+    button.secondary, button.ghost {
+      color: #1e3a8a;
+      background: #fff;
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      box-shadow: none;
+    }
+    button.ghost { border-style: dashed; color: var(--muted); }
+    button:disabled { opacity: .62; cursor: wait; transform: none; }
+    .status-line { min-height: 20px; font-size: 13px; }
+    .inspector {
+      display: grid;
+      grid-template-rows: auto auto auto auto 1fr;
+      background: linear-gradient(180deg, rgba(255,255,255,0.97) 0%, rgba(247,250,255,0.97) 100%);
+    }
+    .inspector-section { padding-top: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+    .inspector-section:last-child { border-bottom: none; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto 1fr; }
+    .inspector-title { margin: 0 0 12px; font-size: 16px; }
+    .metric-card, .record-card { padding: 12px 14px; }
+    .metric-value { font-weight: 700; font-size: 15px; }
+    .sequence-box textarea {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      min-height: 140px;
+    }
+    .records { overflow: auto; max-height: 100%; padding-right: 2px; }
+    .record-seq {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+      color: #334155;
+    }
+    .diff-wrap { overflow: hidden; }
+    .diff-summary {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .diff-box {
+      padding: 12px;
+      max-height: 220px;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.8;
+      white-space: normal;
+      word-break: break-word;
+    }
+    .diff-char {
+      display: inline-block;
+      min-width: 12px;
+      text-align: center;
+      padding: 1px 0;
+      border-radius: 6px;
+      margin: 1px 1px;
+      background: var(--diff-same);
+    }
+    .diff-char.change { background: var(--diff-change); color: var(--primary-strong); font-weight: 700; }
+    .diff-char.insert { background: var(--diff-insert); color: var(--success); font-weight: 700; }
+    .diff-char.delete { background: var(--diff-delete); color: var(--danger); text-decoration: line-through; font-weight: 700; }
+    pre {
+      margin: 0;
+      border-radius: 18px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      padding: 16px;
+      overflow: auto;
+      max-height: 360px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .empty-state {
+      border: 1px dashed var(--border-strong);
+      border-radius: 16px;
+      padding: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      background: rgba(255,255,255,0.6);
+    }
+    @media (max-width: 1320px) {
+      .workspace { grid-template-columns: 240px minmax(0, 1fr) 340px; }
+    }
+    @media (max-width: 1120px) {
+      .workspace { grid-template-columns: 1fr; }
+      .sidebar, .chat-shell, .inspector { min-height: auto; }
+      .chat-window { max-height: none; }
+    }
+    @media (max-width: 720px) {
+      .workspace { padding: 12px; gap: 12px; }
+      .sidebar-header, .nav-section, .sidebar-footer, .topbar, .context-bar, .composer, .inspector-section {
+        padding-left: 16px; padding-right: 16px;
+      }
+      .composer-grid, .metric-grid { grid-template-columns: 1fr; }
+      .msg-row, .msg-row.user { grid-template-columns: 36px minmax(0, 1fr); }
+      .msg-row.user .avatar, .msg-row.user .bubble-wrap { order: 0; }
+      .msg-row.user .bubble-wrap { align-items: flex-start; }
+      .bubble { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-row">
+          <div class="brand-tag">Real ESM3 Online</div>
+          <button id="themeToggle" class="theme-btn" type="button">切换深色</button>
+        </div>
+        <h1 class="brand-title">ESM3 Chat Workspace</h1>
+        <p class="brand-subtitle">像聊天助手一样下达蛋白设计任务，由真实 ESM3 与 Agent 编排链路协同执行。</p>
+      </div>
+      <section class="nav-section">
+        <p class="section-label">连接状态</p>
+        <div class="status-stack">
+          <div class="status-pill"><span id="agentDot" class="status-dot"></span><div class="status-text"><strong>Agent API</strong><span id="agentStatus">检测中…</span></div></div>
+          <div class="status-pill"><span id="esm3Dot" class="status-dot"></span><div class="status-text"><strong>ESM3 Runtime</strong><span id="esm3Status">检测中…</span></div></div>
+        </div>
+      </section>
+      <section class="nav-section">
+        <p class="section-label">最近任务</p>
+        <div id="recentList" class="recent-list"><div class="empty-small">最近还没有已完成的任务。执行几次优化后，这里会自动保留最近任务历史。</div></div>
+      </section>
+      <section class="nav-section">
+        <p class="section-label">快速入口</p>
+        <div class="link-stack">
+          <a class="nav-link" href="/docs" target="_blank" rel="noreferrer"><strong>API 文档</strong><span>查看 `/design_protein` 与健康检查接口。</span></a>
+          <a class="nav-link" href="/health" target="_blank" rel="noreferrer"><strong>Agent 健康检查</strong><span>快速确认 Python Agent 当前是否正常。</span></a>
+          <a class="nav-link" href="/ui/status" target="_blank" rel="noreferrer"><strong>聚合状态</strong><span>查看 Agent 与 ESM3 服务整体状态。</span></a>
+        </div>
+      </section>
+      <section class="nav-section">
+        <p class="section-label">建议提示词</p>
+        <div class="hint-stack">
+          <div class="hint-card"><strong>GFP 自动优化</strong><p>请自动设计 GFP 并迭代优化，同时输出最佳候选与关键评分解释。</p></div>
+          <div class="hint-card"><strong>约束式设计</strong><p>请自动设计 GFP，尽量保留 GSG motif，并避免使用 C。</p></div>
+          <div class="hint-card"><strong>继续上一轮</strong><p>基于上一轮最佳序列继续优化，并做更严格筛选。</p></div>
+        </div>
+      </section>
+      <div class="sidebar-footer">建议先确认左侧状态全部正常，再在中间对话区连续发送任务；右侧面板会同步展示最佳结果、序列差异和候选历史。</div>
+    </aside>
+
+    <main class="chat-shell">
+      <header class="topbar">
+        <div>
+          <h2 class="topbar-title">对话式蛋白设计</h2>
+          <p class="topbar-subtitle">发送目标、约束和优化方向；系统会把结构化计划、迭代结果和最佳序列整合成聊天回复。</p>
+        </div>
+        <div class="topbar-actions">
+          <div class="chip">端点 <code>/design_protein</code></div>
+          <div class="chip">真实模型 <code>esm3_sm_open_v1</code></div>
+        </div>
+      </header>
+
+      <div class="context-bar">
+        <div class="context-note">默认会把上一轮最佳序列自动带入下一轮任务，便于连续优化。</div>
+        <div id="contextSeq" class="context-seq">当前没有可继承的最佳序列</div>
+      </div>
+
+      <section id="chatWindow" class="chat-window" aria-live="polite"></section>
+
+      <section class="composer">
+        <textarea id="prompt" placeholder="例如：请自动设计 GFP 并迭代优化，尽量保留 GSG motif，避免 C，并解释为什么当前最佳候选更值得下一轮验证。&#10;&#10;按 Ctrl/Cmd + Enter 可直接发送。"></textarea>
+        <div class="composer-grid">
+          <div class="field"><label for="maxIterations">最大迭代轮数</label><input id="maxIterations" type="number" min="1" max="100" value="3" /></div>
+          <div class="field"><label for="candidatesPerRound">每轮候选数</label><input id="candidatesPerRound" type="number" min="1" max="64" value="4" /></div>
+          <div class="field"><label for="patience">提前停止容忍轮数</label><input id="patience" type="number" min="1" max="100" value="2" /></div>
+        </div>
+        <div class="composer-row">
+          <label class="toggle"><input id="carryBestToggle" type="checkbox" checked /> 自动带上上一轮最佳序列</label>
+          <div class="quick-actions">
+            <button class="secondary" data-q="请自动设计 GFP 并迭代优化">GFP 自动优化</button>
+            <button class="secondary" data-q="请自动设计 GFP，并尽量保留 GSG motif">保留 GSG motif</button>
+            <button class="secondary" data-q="请自动设计 GFP，避免使用 C，并做更严格筛选">避免 C + 严格筛选</button>
+          </div>
+        </div>
+        <div class="composer-row">
+          <div id="statusLine" class="status-line"></div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;"><button id="clearBtn" class="ghost" type="button">清空会话</button><button id="sendBtn" type="button">发送任务</button></div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="inspector">
+      <section class="inspector-section">
+        <h3 class="inspector-title">最新结果摘要</h3>
+        <div id="summaryBox" class="metric-grid"><div class="metric-card"><div class="metric-label">状态</div><div class="metric-value">等待任务…</div></div></div>
+      </section>
+      <section class="inspector-section sequence-box">
+        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">最佳序列</h3><button id="copySeqBtn" class="secondary" type="button">复制序列</button></div>
+        <textarea id="bestSequence" readonly placeholder="执行任务后，这里会显示当前最佳序列。"></textarea>
+      </section>
+      <section class="inspector-section">
+        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">与上一轮最佳序列的差异</h3><span id="diffTag" class="chip" style="padding:6px 10px;">暂无对比</span></div>
+        <div class="diff-wrap"><div id="diffSummary" class="diff-summary">执行至少两次任务后，这里会高亮展示最佳序列之间的变化位点。</div><div id="diffBox" class="diff-box"><div class="empty-state">当前还没有可展示的序列差异。</div></div></div>
+      </section>
+      <section class="inspector-section">
+        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">候选历史</h3><span class="chip" style="padding:6px 10px;">Top Candidates</span></div>
+        <div id="recordsBox" class="records"><div class="empty-state">执行任务后，这里会显示当前轮次内的候选及评分。</div></div>
+      </section>
+      <section class="inspector-section">
+        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">完整 JSON</h3><button id="copyJsonBtn" class="secondary" type="button">复制 JSON</button></div>
+        <pre id="jsonBox">等待任务结果…</pre>
+      </section>
+    </aside>
+  </div>
+
+  <script>
+    const THEME_KEY = 'esm3_chat_theme';
+    const RECENT_TASKS_KEY = 'esm3_recent_tasks_v1';
+    const MAX_RECENT_TASKS = 8;
+
+    const chatWindow = document.getElementById('chatWindow');
+    const promptEl = document.getElementById('prompt');
+    const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const statusLine = document.getElementById('statusLine');
+    const maxIterationsEl = document.getElementById('maxIterations');
+    const candidatesEl = document.getElementById('candidatesPerRound');
+    const patienceEl = document.getElementById('patience');
+    const carryBestToggle = document.getElementById('carryBestToggle');
+    const summaryBox = document.getElementById('summaryBox');
+    const recordsBox = document.getElementById('recordsBox');
+    const bestSequenceEl = document.getElementById('bestSequence');
+    const copySeqBtn = document.getElementById('copySeqBtn');
+    const jsonBox = document.getElementById('jsonBox');
+    const copyJsonBtn = document.getElementById('copyJsonBtn');
+    const quickButtons = document.querySelectorAll('[data-q]');
+    const agentDot = document.getElementById('agentDot');
+    const agentStatus = document.getElementById('agentStatus');
+    const esm3Dot = document.getElementById('esm3Dot');
+    const esm3Status = document.getElementById('esm3Status');
+    const contextSeq = document.getElementById('contextSeq');
+    const themeToggle = document.getElementById('themeToggle');
+    const recentList = document.getElementById('recentList');
+    const diffSummary = document.getElementById('diffSummary');
+    const diffBox = document.getElementById('diffBox');
+    const diffTag = document.getElementById('diffTag');
+
+    const conversation = [{ role: 'assistant', content: '你好，我是 ESM3 聊天式蛋白设计助手。你可以直接说“请自动设计 GFP 并迭代优化”，我会调用真实 ESM3，并把计划、最佳候选与可继续追问的上下文整理成聊天结果。' }];
+    let latestResult = null;
+    let latestBestSequence = '';
+    let previousBestSequence = '';
+
+    function getRecentTasks() {
+      try {
+        return JSON.parse(localStorage.getItem(RECENT_TASKS_KEY) || '[]');
+      } catch {
+        return [];
+      }
+    }
+
+    function saveRecentTasks(items) {
+      localStorage.setItem(RECENT_TASKS_KEY, JSON.stringify(items.slice(0, MAX_RECENT_TASKS)));
+    }
+
+    function formatTime(ts) {
+      try {
+        return new Date(ts).toLocaleString('zh-CN', { hour12: false });
+      } catch {
+        return String(ts || '');
+      }
+    }
+
+    function applyTheme(theme) {
+      const finalTheme = theme === 'dark' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', finalTheme);
+      localStorage.setItem(THEME_KEY, finalTheme);
+      themeToggle.textContent = finalTheme === 'dark' ? '切换浅色' : '切换深色';
+    }
+
+    function renderRecentTasks() {
+      const items = getRecentTasks();
+      if (!items.length) {
+        recentList.innerHTML = '<div class="empty-small">最近还没有已完成的任务。执行几次优化后，这里会自动保留最近任务历史。</div>';
+        return;
+      }
+      recentList.innerHTML = items.map((item, idx) => `
+        <button class="recent-item" type="button" data-index="${idx}">
+          <strong>${item.title || '未命名任务'}</strong>
+          <span>${item.preview || ''}</span>
+          <div class="recent-meta">${formatTime(item.timestamp)} · score ${Number(item.score ?? 0).toFixed(4)} · iter ${item.iteration ?? '-'}</div>
+        </button>
+      `).join('');
+      recentList.querySelectorAll('.recent-item').forEach((button) => {
+        button.addEventListener('click', () => {
+          const index = Number(button.dataset.index);
+          const item = items[index];
+          if (!item) return;
+          promptEl.value = item.task || '';
+          if (Number.isFinite(item.maxIterations)) maxIterationsEl.value = item.maxIterations;
+          if (Number.isFinite(item.candidatesPerRound)) candidatesEl.value = item.candidatesPerRound;
+          if (Number.isFinite(item.patience)) patienceEl.value = item.patience;
+          promptEl.focus();
+        });
+      });
+    }
+
+    function rememberTask(task, request, result) {
+      const best = result?.best_sequences || {};
+      const items = getRecentTasks().filter((row) => row.task !== task);
+      items.unshift({
+        task,
+        title: task.length > 24 ? `${task.slice(0, 24)}…` : task,
+        preview: (best.sequence || '').slice(0, 48),
+        score: best.score ?? 0,
+        iteration: best.iteration ?? '-',
+        maxIterations: request.max_iterations,
+        candidatesPerRound: request.candidates_per_round,
+        patience: request.patience,
+        timestamp: Date.now(),
+      });
+      saveRecentTasks(items);
+      renderRecentTasks();
+    }
+
+    function renderConversation() {
+      chatWindow.innerHTML = '';
+      for (const message of conversation) {
+        const row = document.createElement('div');
+        row.className = `msg-row ${message.role}`;
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar';
+        avatar.textContent = message.role === 'user' ? '你' : 'AI';
+        const wrap = document.createElement('div');
+        wrap.className = 'bubble-wrap';
+        const meta = document.createElement('div');
+        meta.className = 'msg-meta';
+        meta.textContent = message.role === 'user' ? '你的任务' : 'Agent 回复';
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.textContent = message.content;
+        wrap.appendChild(meta);
+        wrap.appendChild(bubble);
+        row.appendChild(avatar);
+        row.appendChild(wrap);
+        chatWindow.appendChild(row);
+      }
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function setBusy(busy, text='') {
+      sendBtn.disabled = busy;
+      promptEl.disabled = busy;
+      maxIterationsEl.disabled = busy;
+      candidatesEl.disabled = busy;
+      patienceEl.disabled = busy;
+      statusLine.textContent = busy ? text || '正在调用真实 ESM3 与 Agent…' : '';
+    }
+
+    function safeNumber(value, fallback) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function refreshContextSeq() {
+      if (!carryBestToggle.checked) {
+        contextSeq.textContent = '已关闭“自动带上上一轮最佳序列”';
+        return;
+      }
+      if (!latestBestSequence) {
+        contextSeq.textContent = '当前没有可继承的最佳序列';
+        return;
+      }
+      contextSeq.textContent = latestBestSequence;
+    }
+
+    function buildTask(content) {
+      if (!carryBestToggle.checked || !latestBestSequence) return content;
+      return `${content}\n\n上一轮最佳序列参考：${latestBestSequence}`;
+    }
+
+    function buildRequest(content) {
+      return {
+        task: buildTask(content),
+        max_iterations: safeNumber(maxIterationsEl.value, 3),
+        candidates_per_round: safeNumber(candidatesEl.value, 4),
+        patience: safeNumber(patienceEl.value, 2)
+      };
+    }
+
+    function topRecords(records, limit = 6) {
+      return [...(records || [])].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, limit);
+    }
+
+    function summarizeResult(result) {
+      const best = result?.best_sequences;
+      const records = result?.history || [];
+      const plan = result?.plan || {};
+      if (!best) return '任务已执行，但没有解析到最佳序列。建议查看右侧完整 JSON 进一步排查。';
+      return [
+        '任务已执行完成。',
+        `工作流：${plan.workflow || 'iterative_protein_optimization'}；目标：${plan.target || 'protein'}。`,
+        `本次共记录 ${records.length} 条候选，当前最佳候选来自第 ${best.iteration ?? '-'} 轮，score = ${Number(best.score ?? 0).toFixed(4)}。`,
+        '你可以继续追问，例如“基于上一轮最佳序列继续优化，并加强筛选标准”。'
+      ].join('\n');
+    }
+
+    function diffSequences(previousSeq, currentSeq) {
+      const previous = previousSeq || '';
+      const current = currentSeq || '';
+      if (!previous || !current) {
+        return { changed: 0, html: '<div class="empty-state">执行至少两次任务后，这里会高亮展示最佳序列之间的变化位点。</div>' };
+      }
+      const maxLen = Math.max(previous.length, current.length);
+      let changed = 0;
+      let html = '';
+      for (let i = 0; i < maxLen; i += 1) {
+        const a = previous[i] ?? '';
+        const b = current[i] ?? '';
+        let cls = 'same';
+        let display = b || a || '·';
+        if (!a && b) {
+          cls = 'insert';
+          changed += 1;
+        } else if (a && !b) {
+          cls = 'delete';
+          changed += 1;
+          display = a;
+        } else if (a !== b) {
+          cls = 'change';
+          changed += 1;
+        }
+        html += `<span class="diff-char ${cls}">${display}</span>`;
+        if ((i + 1) % 50 === 0) html += '<br />';
+      }
+      return { changed, html };
+    }
+
+    function renderDiff(previousSeq, currentSeq) {
+      if (!currentSeq || !previousSeq) {
+        diffTag.textContent = '暂无对比';
+        diffSummary.textContent = '执行至少两次任务后，这里会高亮展示最佳序列之间的变化位点。';
+        diffBox.innerHTML = '<div class="empty-state">当前还没有可展示的序列差异。</div>';
+        return;
+      }
+      const { changed, html } = diffSequences(previousSeq, currentSeq);
+      diffTag.textContent = `变化位点 ${changed}`;
+      diffSummary.textContent = `对比上一轮最佳序列与当前最佳序列，共检测到 ${changed} 个变化位点。蓝色表示替换，绿色表示插入，红色表示删除。`;
+      diffBox.innerHTML = html;
+    }
+
+    function renderSummary(result) {
+      const best = result?.best_sequences;
+      const plan = result?.plan || {};
+      const records = result?.history || [];
+      if (!best) {
+        summaryBox.innerHTML = '<div class="metric-card"><div class="metric-label">状态</div><div class="metric-value">等待任务…</div></div>';
+        recordsBox.innerHTML = '<div class="empty-state">执行任务后，这里会显示当前轮次内的候选及评分。</div>';
+        bestSequenceEl.value = '';
+        jsonBox.textContent = '等待任务结果…';
+        latestResult = null;
+        latestBestSequence = '';
+        previousBestSequence = '';
+        renderDiff('', '');
+        refreshContextSeq();
+        return;
+      }
+      previousBestSequence = latestBestSequence;
+      latestResult = result;
+      latestBestSequence = best.sequence || '';
+      bestSequenceEl.value = latestBestSequence;
+      jsonBox.textContent = JSON.stringify(result, null, 2);
+      refreshContextSeq();
+      renderDiff(previousBestSequence, latestBestSequence);
+      summaryBox.innerHTML = [
+        ['工作流', plan.workflow || '-'],
+        ['目标', plan.target || '-'],
+        ['最佳分数', Number(best.score ?? 0).toFixed(4)],
+        ['最佳轮次', String(best.iteration ?? '-')],
+        ['候选记录数', String(records.length)],
+        ['最大迭代', String(plan.max_iterations ?? '-')],
+      ].map(([label, value]) => `<div class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`).join('');
+      const items = topRecords(records);
+      recordsBox.innerHTML = items.map((record, idx) => {
+        const sequence = record.sequence || '-';
+        const shortSeq = sequence.length > 76 ? `${sequence.slice(0, 76)}…` : sequence;
+        return `<div class="record-card"><strong>#${idx + 1} · score ${Number(record.score ?? 0).toFixed(4)}</strong><div class="record-meta">iteration ${record.iteration ?? '-'} · mutation_history ${(record.mutation_history || []).join(', ') || 'seed'}</div><div class="record-seq">${shortSeq}</div></div>`;
+      }).join('');
+    }
+
+    async function refreshStatus() {
+      try {
+        const resp = await fetch('/ui/status');
+        const data = await resp.json();
+        agentDot.className = 'status-dot ok';
+        agentStatus.textContent = `${data.agent?.app_name || 'Protein Agent'} 正常`;
+        if (data.esm3?.status === 'ok') {
+          esm3Dot.className = 'status-dot ok';
+          const health = data.esm3?.health || {};
+          esm3Status.textContent = `${health.model || 'unknown'} · ${health.device || 'unknown'} · ${health.cwd || 'n/a'}`;
+        } else if (data.esm3?.status === 'error') {
+          esm3Dot.className = 'status-dot error';
+          esm3Status.textContent = data.esm3?.error || '无法连接 ESM3';
+        } else {
+          esm3Dot.className = 'status-dot warn';
+          esm3Status.textContent = `后端模式：${data.esm3?.configured_backend || 'unknown'}`;
+        }
+      } catch (error) {
+        agentDot.className = 'status-dot error';
+        agentStatus.textContent = 'Agent 状态获取失败';
+        esm3Dot.className = 'status-dot error';
+        esm3Status.textContent = `ESM3 状态获取失败：${error.message}`;
+      }
+    }
+
+    async function sendMessage(text) {
+      const content = (text ?? promptEl.value).trim();
+      if (!content) return;
+      conversation.push({ role: 'user', content });
+      renderConversation();
+      if (!text) promptEl.value = '';
+      setBusy(true, '正在调用真实 ESM3、生成候选并整理结果…');
+      const requestBody = buildRequest(content);
+      try {
+        const resp = await fetch('/design_protein', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+        if (!resp.ok) {
+          let detail = `HTTP ${resp.status}`;
+          try {
+            const err = await resp.json();
+            detail = err.detail || JSON.stringify(err);
+          } catch {}
+          throw new Error(detail);
+        }
+        const result = await resp.json();
+        renderSummary(result);
+        rememberTask(content, requestBody, result);
+        conversation.push({ role: 'assistant', content: summarizeResult(result) });
+        renderConversation();
+      } catch (error) {
+        conversation.push({ role: 'assistant', content: `任务执行失败：${error.message}` });
+        renderConversation();
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    sendBtn.addEventListener('click', () => sendMessage());
+    promptEl.addEventListener('keydown', (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') sendMessage();
+    });
+    clearBtn.addEventListener('click', () => {
+      conversation.splice(0, conversation.length, { role: 'assistant', content: '会话已清空。你可以重新告诉我目标，例如：请自动设计 GFP 并迭代优化。' });
+      renderConversation();
+      renderSummary(null);
+      promptEl.focus();
+    });
+    carryBestToggle.addEventListener('change', refreshContextSeq);
+    quickButtons.forEach((button) => button.addEventListener('click', () => sendMessage(button.dataset.q)));
+    themeToggle.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme') || 'light';
+      applyTheme(current === 'dark' ? 'light' : 'dark');
+    });
+    copySeqBtn.addEventListener('click', async () => {
+      if (!latestBestSequence) return;
+      try {
+        await navigator.clipboard.writeText(latestBestSequence);
+        copySeqBtn.textContent = '已复制';
+        setTimeout(() => { copySeqBtn.textContent = '复制序列'; }, 1200);
+      } catch {
+        copySeqBtn.textContent = '复制失败';
+        setTimeout(() => { copySeqBtn.textContent = '复制序列'; }, 1200);
+      }
+    });
+    copyJsonBtn.addEventListener('click', async () => {
+      if (!latestResult) return;
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(latestResult, null, 2));
+        copyJsonBtn.textContent = '已复制';
+        setTimeout(() => { copyJsonBtn.textContent = '复制 JSON'; }, 1200);
+      } catch {
+        copyJsonBtn.textContent = '复制失败';
+        setTimeout(() => { copyJsonBtn.textContent = '复制 JSON'; }, 1200);
+      }
+    });
+    applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+    renderConversation();
+    renderSummary(null);
+    renderRecentTasks();
+    refreshContextSeq();
+    refreshStatus();
+  </script>
+</body>
+</html>

@@ -123,11 +123,30 @@ export PROTEIN_AGENT_ESM3_SERVER_URL=http://127.0.0.1:8001
 /mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python -m uvicorn protein_agent.api.main:app --host 0.0.0.0 --port 8000
 ```
 
+启动后可直接在浏览器访问聊天界面：
+
+```text
+http://127.0.0.1:8000/
+```
+
+如果你是通过 SSH 隧道映射到本机 `8080`，则访问：
+
+```text
+http://127.0.0.1:8080/
+```
+
+API 文档仍保留在：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
 快速检查命令：
 
 ```bash
 curl http://127.0.0.1:8001/health
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/
 curl -X POST http://127.0.0.1:8000/design_protein \
   -H 'Content-Type: application/json' \
   -d '{"task":"Automatically design GFP and iteratively optimize it", "max_iterations": 3, "candidates_per_round": 4}'
