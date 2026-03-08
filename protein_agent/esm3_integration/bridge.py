@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import io
 import inspect
 import json
 import os
@@ -140,11 +141,16 @@ def build_values(payload: dict[str, Any]) -> dict[str, Any]:
         "prompt": payload.get("prompt") or payload.get("task") or payload.get("sequence") or "",
         "task": payload.get("task") or payload.get("prompt") or "",
         "sequence": (payload.get("sequence") or payload.get("prompt") or "").strip().upper(),
+        "sequence_length": int(payload.get("sequence_length") or 0),
         "num_candidates": max(1, int(payload.get("num_candidates") or 4)),
         "temperature": float(payload.get("temperature") or 0.8),
         "num_mutations": max(1, int(payload.get("num_mutations") or 3)),
         "track": payload.get("track") or "structure",
         "num_steps": int(payload.get("num_steps") or 1),
+        "pdb_path": (payload.get("pdb_path") or "").strip(),
+        "pdb_text": payload.get("pdb_text") or "",
+        "function_annotations": payload.get("function_annotations") or [],
+        "function_keywords": payload.get("function_keywords") or [],
         "model": model_name,
         "model_name": model_name,
         "name": model_name,
@@ -619,6 +625,99 @@ def sdk_generate_sequence(model: Any, prompt_sequence: str, temperature: float, 
     return str(sequence).strip().upper()
 
 
+def build_function_annotations(values: dict[str, Any]) -> list[Any]:
+    from esm.sdk.api import FunctionAnnotation
+
+    annotations: list[Any] = []
+    sequence_length = int(values.get("sequence_length") or 0)
+    base_sequence = values.get("sequence") or ""
+    if sequence_length <= 0:
+        sequence_length = len(base_sequence) if base_sequence else 128
+
+    for item in values.get("function_annotations") or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("name") or "").strip()
+        if not label:
+            continue
+        start = int(item.get("start") or 1)
+        end = int(item.get("end") or sequence_length)
+        annotations.append(FunctionAnnotation(label=label, start=min(start, end), end=max(start, end)))
+
+    for keyword in values.get("function_keywords") or []:
+        label = str(keyword).strip()
+        if not label:
+            continue
+        annotations.append(FunctionAnnotation(label=label, start=1, end=sequence_length))
+    return annotations
+
+
+def base_sequence_for_function(values: dict[str, Any]) -> str:
+    sequence = (values.get("sequence") or "").strip().upper()
+    if sequence:
+        if "_" in sequence:
+            return sequence
+        return mask_sequence(sequence, max(1, len(sequence) // 5))
+
+    sequence_length = int(values.get("sequence_length") or 0)
+    if sequence_length <= 0:
+        sequence_length = 128
+    return "_" * sequence_length
+
+
+def sdk_generate_with_function(model: Any, values: dict[str, Any]) -> list[str]:
+    from esm.sdk.api import ESMProtein, GenerationConfig
+
+    annotations = build_function_annotations(values)
+    if not annotations:
+        raise RuntimeError("function-conditioned generation requires function_annotations or function_keywords")
+
+    prompt_sequence = base_sequence_for_function(values)
+    sequences: list[str] = []
+    for _ in range(values["num_candidates"]):
+        protein = ESMProtein(sequence=prompt_sequence, function_annotations=annotations)
+        config = GenerationConfig(
+            track="sequence",
+            num_steps=max(values["num_steps"], prompt_sequence.count("_"), 1),
+            temperature=float(values["temperature"]),
+        )
+        result = model.generate(protein, config)
+        sequence = getattr(result, "sequence", None)
+        if not sequence:
+            raise RuntimeError("function-conditioned generation returned empty sequence")
+        sequences.append(str(sequence).strip().upper())
+    return sequences
+
+
+def sdk_inverse_fold(model: Any, values: dict[str, Any]) -> list[str]:
+    from esm.sdk.api import ESMProtein, GenerationConfig
+
+    pdb_path = values.get("pdb_path") or ""
+    pdb_text = values.get("pdb_text") or ""
+
+    if pdb_path:
+        protein = ESMProtein.from_pdb(pdb_path)
+    elif pdb_text:
+        protein = ESMProtein.from_pdb(io.StringIO(pdb_text))
+    else:
+        raise RuntimeError("inverse folding requires pdb_path or pdb_text")
+
+    protein.sequence = None
+    sequences: list[str] = []
+    for _ in range(values["num_candidates"]):
+        config = GenerationConfig(
+            track="sequence",
+            num_steps=max(values["num_steps"], 1),
+            temperature=float(values["temperature"]),
+        )
+        result = model.generate(protein, config)
+        sequence = getattr(result, "sequence", None)
+        if not sequence:
+            raise RuntimeError("inverse folding returned empty sequence")
+        sequences.append(str(sequence).strip().upper())
+    return sequences
+
+
 def sdk_predict_structure(model: Any, sequence: str, num_steps: int) -> dict[str, Any]:
     from esm.sdk.api import ESMProtein, GenerationConfig
 
@@ -754,11 +853,33 @@ def structure_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
     raise RuntimeError(" | ".join(errors[:12]) if errors else "model exposes no structure method")
 
 
+def inverse_fold_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    values = build_values(payload)
+    try:
+        return {"sequences": sdk_inverse_fold(model, values), "entrypoint_used": "esm_sdk.inverse_fold"}
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"esm_sdk.inverse_fold: {exc}") from exc
+
+
+def function_conditioned_generate_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    values = build_values(payload)
+    try:
+        return {
+            "sequences": sdk_generate_with_function(model, values),
+            "function_annotations": values.get("function_annotations") or values.get("function_keywords") or [],
+            "entrypoint_used": "esm_sdk.function_conditioned_generate",
+        }
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"esm_sdk.function_conditioned_generate: {exc}") from exc
+
+
 def env_entrypoint(operation: str) -> str:
     mapping = {
         "generate": "PROTEIN_AGENT_ESM3_GENERATE_ENTRYPOINT",
         "mutate": "PROTEIN_AGENT_ESM3_MUTATE_ENTRYPOINT",
         "predict_structure": "PROTEIN_AGENT_ESM3_STRUCTURE_ENTRYPOINT",
+        "inverse_fold": "PROTEIN_AGENT_ESM3_INVERSE_FOLD_ENTRYPOINT",
+        "generate_with_function": "PROTEIN_AGENT_ESM3_FUNCTION_GENERATE_ENTRYPOINT",
     }
     return os.environ.get(mapping[operation], "").strip()
 
@@ -767,7 +888,7 @@ def main() -> None:
     configure_paths()
     payload = read_payload()
     operation = (payload.get("operation") or "").strip()
-    if operation not in {"generate", "mutate", "predict_structure"}:
+    if operation not in {"generate", "mutate", "predict_structure", "inverse_fold", "generate_with_function"}:
         emit({"error": f"unsupported operation: {operation}"})
         return
 
@@ -779,6 +900,12 @@ def main() -> None:
         return
     if operation == "generate" and not (values["prompt"] or values["sequence"]):
         emit({"error": "prompt or sequence is required"})
+        return
+    if operation == "inverse_fold" and not (values["pdb_path"] or values["pdb_text"]):
+        emit({"error": "inverse folding requires pdb_path or pdb_text"})
+        return
+    if operation == "generate_with_function" and not (values["function_annotations"] or values["function_keywords"]):
+        emit({"error": "function-conditioned generation requires function_annotations or function_keywords"})
         return
 
     if entrypoint:
@@ -815,6 +942,10 @@ def main() -> None:
             emit(generate_with_model(model, payload))
         elif operation == "mutate":
             emit(mutate_with_model(model, payload))
+        elif operation == "inverse_fold":
+            emit(inverse_fold_with_model(model, payload))
+        elif operation == "generate_with_function":
+            emit(function_conditioned_generate_with_model(model, payload))
         else:
             emit(structure_with_model(model, payload))
     except Exception as exc:  # noqa: BLE001

@@ -74,6 +74,50 @@ class ESM3Client:
             },
         )
 
+    def inverse_fold(
+        self,
+        pdb_path: str | None = None,
+        pdb_text: str | None = None,
+        num_candidates: int = 4,
+        temperature: float = 0.8,
+        num_steps: int = 1,
+    ) -> dict[str, Any]:
+        return self._call(
+            "inverse_fold",
+            {
+                "pdb_path": pdb_path or "",
+                "pdb_text": pdb_text or "",
+                "num_candidates": num_candidates,
+                "temperature": temperature,
+                "num_steps": num_steps,
+                "model": self.settings.esm3_model_name,
+            },
+        )
+
+    def generate_with_function(
+        self,
+        sequence: str | None = None,
+        sequence_length: int | None = None,
+        function_annotations: list[dict[str, Any]] | None = None,
+        function_keywords: list[str] | None = None,
+        num_candidates: int = 4,
+        temperature: float = 0.8,
+        num_steps: int = 1,
+    ) -> dict[str, Any]:
+        return self._call(
+            "generate_with_function",
+            {
+                "sequence": sequence or "",
+                "sequence_length": sequence_length or 0,
+                "function_annotations": function_annotations or [],
+                "function_keywords": function_keywords or [],
+                "num_candidates": num_candidates,
+                "temperature": temperature,
+                "num_steps": num_steps,
+                "model": self.settings.esm3_model_name,
+            },
+        )
+
     def _call(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         errors: list[str] = []
         for backend in self._backend_order():
@@ -127,6 +171,8 @@ class ESM3Client:
                 self.settings.esm3_generate_entrypoint,
                 self.settings.esm3_mutate_entrypoint,
                 self.settings.esm3_structure_entrypoint,
+                self.settings.esm3_inverse_fold_entrypoint,
+                self.settings.esm3_function_generate_entrypoint,
                 self.settings.esm3_extra_pythonpath,
             ]
         )
@@ -138,6 +184,8 @@ class ESM3Client:
             "generate": "/generate_sequence",
             "mutate": "/mutate_sequence",
             "predict_structure": "/predict_structure",
+            "inverse_fold": "/inverse_fold",
+            "generate_with_function": "/generate_with_function",
         }
         path = path_map.get(operation)
         if not path:
@@ -209,6 +257,8 @@ class ESM3Client:
                     "generate": {"sequences": ["AASEQ"]},
                     "mutate": {"sequences": ["AASEQ"]},
                     "predict_structure": {"structure": {}, "confidence": 0.0},
+                    "inverse_fold": {"sequences": ["AASEQ"]},
+                    "generate_with_function": {"sequences": ["AASEQ"], "function_annotations": []},
                 },
                 "rules": [
                     "Output Python code only.",
@@ -273,6 +323,8 @@ class ESM3Client:
             "PROTEIN_AGENT_ESM3_GENERATE_ENTRYPOINT": self.settings.esm3_generate_entrypoint or "",
             "PROTEIN_AGENT_ESM3_MUTATE_ENTRYPOINT": self.settings.esm3_mutate_entrypoint or "",
             "PROTEIN_AGENT_ESM3_STRUCTURE_ENTRYPOINT": self.settings.esm3_structure_entrypoint or "",
+            "PROTEIN_AGENT_ESM3_INVERSE_FOLD_ENTRYPOINT": self.settings.esm3_inverse_fold_entrypoint or "",
+            "PROTEIN_AGENT_ESM3_FUNCTION_GENERATE_ENTRYPOINT": self.settings.esm3_function_generate_entrypoint or "",
             "PROTEIN_AGENT_ESM3_EXTRA_PYTHONPATH": self.settings.esm3_extra_pythonpath or "",
         }
         env.update(mappings)

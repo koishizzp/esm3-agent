@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 from protein_agent.esm3_integration.bridge import (
     build_values,
     configure_paths,
+    function_conditioned_generate_with_model,
     generate_with_model,
+    inverse_fold_with_model,
     load_direct_model,
     mutate_with_model,
     structure_with_model,
@@ -82,6 +84,30 @@ class StructureRequest(BaseModel):
     sequence: str
 
 
+class InverseFoldRequest(BaseModel):
+    pdb_path: str | None = None
+    pdb_text: str | None = None
+    num_candidates: int = Field(default=4, ge=1, le=64)
+    temperature: float = Field(default=0.8, gt=0)
+    num_steps: int = Field(default=1, ge=1, le=512)
+
+
+class FunctionAnnotationInput(BaseModel):
+    label: str
+    start: int | None = Field(default=None, ge=1)
+    end: int | None = Field(default=None, ge=1)
+
+
+class FunctionGenerateRequest(BaseModel):
+    sequence: str | None = None
+    sequence_length: int | None = Field(default=None, ge=1, le=4096)
+    function_annotations: list[FunctionAnnotationInput] | None = None
+    function_keywords: list[str] | None = None
+    num_candidates: int = Field(default=4, ge=1, le=64)
+    temperature: float = Field(default=0.8, gt=0)
+    num_steps: int = Field(default=1, ge=1, le=4096)
+
+
 class ESM3Service:
     def __init__(self) -> None:
         ensure_runtime_paths()
@@ -133,6 +159,54 @@ class ESM3Service:
             return result
         except Exception as exc:
             raise RuntimeError(f"Structure prediction failed: {exc}") from exc
+
+    def inverse_fold(
+        self,
+        pdb_path: str | None,
+        pdb_text: str | None,
+        num_candidates: int,
+        temperature: float,
+        num_steps: int,
+    ) -> list[str]:
+        try:
+            payload = {
+                "pdb_path": pdb_path or "",
+                "pdb_text": pdb_text or "",
+                "num_candidates": num_candidates,
+                "temperature": temperature,
+                "num_steps": num_steps,
+                "device": self.device,
+            }
+            return inverse_fold_with_model(self.model, payload)["sequences"]
+        except Exception as exc:
+            raise RuntimeError(f"Inverse folding failed: {exc}") from exc
+
+    def generate_with_function(
+        self,
+        sequence: str | None,
+        sequence_length: int | None,
+        function_annotations: list[dict[str, Any]] | None,
+        function_keywords: list[str] | None,
+        num_candidates: int,
+        temperature: float,
+        num_steps: int,
+    ) -> dict[str, Any]:
+        try:
+            payload = {
+                "sequence": sequence or "",
+                "sequence_length": sequence_length or 0,
+                "function_annotations": function_annotations or [],
+                "function_keywords": function_keywords or [],
+                "num_candidates": num_candidates,
+                "temperature": temperature,
+                "num_steps": num_steps,
+                "device": self.device,
+            }
+            result = function_conditioned_generate_with_model(self.model, payload)
+            result["device"] = self.device
+            return result
+        except Exception as exc:
+            raise RuntimeError(f"Function-conditioned generation failed: {exc}") from exc
 
 
 SERVICE: ESM3Service | None = None
@@ -190,4 +264,45 @@ def predict_structure(req: StructureRequest) -> dict[str, Any]:
         return SERVICE.predict_structure(req.sequence)
     except RuntimeError as exc:
         LOGGER.exception("ESM3 predict_structure failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/inverse_fold")
+def inverse_fold(req: InverseFoldRequest) -> dict[str, Any]:
+    if SERVICE is None:
+        raise HTTPException(status_code=503, detail="Model service unavailable")
+    try:
+        return {
+            "sequences": SERVICE.inverse_fold(
+                req.pdb_path,
+                req.pdb_text,
+                req.num_candidates,
+                req.temperature,
+                req.num_steps,
+            )
+        }
+    except RuntimeError as exc:
+        LOGGER.exception("ESM3 inverse_fold failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/generate_with_function")
+def generate_with_function(req: FunctionGenerateRequest) -> dict[str, Any]:
+    if SERVICE is None:
+        raise HTTPException(status_code=503, detail="Model service unavailable")
+    try:
+        annotations = []
+        for item in req.function_annotations or []:
+            annotations.append(item.model_dump())
+        return SERVICE.generate_with_function(
+            req.sequence,
+            req.sequence_length,
+            annotations,
+            req.function_keywords,
+            req.num_candidates,
+            req.temperature,
+            req.num_steps,
+        )
+    except RuntimeError as exc:
+        LOGGER.exception("ESM3 generate_with_function failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

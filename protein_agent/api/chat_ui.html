@@ -363,12 +363,59 @@
       box-shadow: 0 0 0 4px rgba(37,99,235,0.08);
     }
     textarea { min-height: 108px; resize: vertical; line-height: 1.6; }
-    .composer-grid, .metric-grid { display: grid; gap: 10px; }
+    .composer-grid, .metric-grid, .mode-grid { display: grid; gap: 10px; }
     .composer-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .mode-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
     .composer-row { justify-content: space-between; }
     .toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .mode-card {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.86);
+      box-shadow: var(--shadow-soft);
+      padding: 12px 14px;
+      cursor: pointer;
+      text-align: left;
+      color: var(--text);
+    }
+    .mode-card.active {
+      border-color: rgba(37,99,235,0.5);
+      background: var(--primary-soft);
+    }
+    .mode-card strong { display: block; font-size: 14px; margin-bottom: 4px; }
+    .mode-card span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .mode-panel {
+      display: none;
+      border: 1px dashed var(--border-strong);
+      border-radius: 16px;
+      padding: 12px;
+      background: rgba(255,255,255,0.6);
+    }
+    .mode-panel.active { display: grid; gap: 10px; }
+    .mode-panel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .mode-help { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .inline-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .file-input {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.86);
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     button {
       border: none;
       border-radius: 14px;
@@ -400,6 +447,9 @@
     .inspector-section:last-child { border-bottom: none; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto 1fr; }
     .inspector-title { margin: 0 0 12px; font-size: 16px; }
     .metric-card, .record-card { padding: 12px 14px; }
+    .record-card.design { border-left: 4px solid rgba(37,99,235,0.55); }
+    .record-card.inverse_fold { border-left: 4px solid rgba(22,163,74,0.55); }
+    .record-card.function { border-left: 4px solid rgba(217,119,6,0.55); }
     .metric-value { font-weight: 700; font-size: 15px; }
     .sequence-box textarea {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -475,7 +525,7 @@
       .sidebar-header, .nav-section, .sidebar-footer, .topbar, .context-bar, .composer, .inspector-section {
         padding-left: 16px; padding-right: 16px;
       }
-      .composer-grid, .metric-grid { grid-template-columns: 1fr; }
+      .composer-grid, .metric-grid, .mode-grid, .mode-panel-grid { grid-template-columns: 1fr; }
       .msg-row, .msg-row.user { grid-template-columns: 36px minmax(0, 1fr); }
       .msg-row.user .avatar, .msg-row.user .bubble-wrap { order: 0; }
       .msg-row.user .bubble-wrap { align-items: flex-start; }
@@ -545,10 +595,81 @@
 
       <section class="composer">
         <textarea id="prompt" placeholder="例如：请自动设计 GFP 并迭代优化，尽量保留 GSG motif，避免 C，并解释为什么当前最佳候选更值得下一轮验证。&#10;&#10;按 Ctrl/Cmd + Enter 可直接发送。"></textarea>
-        <div class="composer-grid">
-          <div class="field"><label for="maxIterations">最大迭代轮数</label><input id="maxIterations" type="number" min="1" max="100" value="3" /></div>
-          <div class="field"><label for="candidatesPerRound">每轮候选数</label><input id="candidatesPerRound" type="number" min="1" max="64" value="4" /></div>
-          <div class="field"><label for="patience">提前停止容忍轮数</label><input id="patience" type="number" min="1" max="100" value="2" /></div>
+        <div class="mode-grid">
+          <button class="mode-card active" type="button" data-mode="design"><strong>迭代设计</strong><span>调用 `/design_protein`，适合 GFP 与多轮优化任务。</span></button>
+          <button class="mode-card" type="button" data-mode="inverse_fold"><strong>逆折叠</strong><span>给定 PDB 结构，生成候选序列。</span></button>
+          <button class="mode-card" type="button" data-mode="function"><strong>功能条件化生成</strong><span>给定功能关键词或注释，生成候选序列。</span></button>
+        </div>
+        <div id="designPanel" class="mode-panel active">
+          <div class="composer-grid">
+            <div class="field"><label for="maxIterations">最大迭代轮数</label><input id="maxIterations" type="number" min="1" max="100" value="3" /></div>
+            <div class="field"><label for="candidatesPerRound">每轮候选数</label><input id="candidatesPerRound" type="number" min="1" max="64" value="4" /></div>
+            <div class="field"><label for="patience">提前停止容忍轮数</label><input id="patience" type="number" min="1" max="100" value="2" /></div>
+          </div>
+          <div class="mode-panel-grid">
+            <div class="field"><label for="populationSize">种群大小</label><input id="populationSize" type="number" min="1" max="512" value="8" /></div>
+            <div class="field"><label for="eliteSize">精英保留数</label><input id="eliteSize" type="number" min="1" max="128" value="2" /></div>
+            <div class="field"><label for="parentPoolSize">父代池大小</label><input id="parentPoolSize" type="number" min="1" max="256" value="4" /></div>
+          </div>
+          <div class="mode-panel-grid">
+            <div class="field"><label for="mutationsPerParent">每个父代突变位点数</label><input id="mutationsPerParent" type="number" min="1" max="64" value="3" /></div>
+          </div>
+          <div class="mode-help">高级输入会进入同一个 `POST /design_protein` 请求，用于多模态推理：文本任务 + 参考序列 + 结构 + 功能约束。</div>
+          <div class="mode-panel-grid">
+            <div class="field"><label for="designSequence">参考序列（可选）</label><input id="designSequence" type="text" placeholder="可作为初始 seed sequence" /></div>
+            <div class="field"><label for="designSequenceLength">目标长度（可选）</label><input id="designSequenceLength" type="number" min="1" max="4096" placeholder="留空则不显式约束长度" /></div>
+            <div class="field"><label for="designStructurePath">结构路径（可选）</label><input id="designStructurePath" type="text" placeholder="/abs/path/to/example.pdb" /></div>
+          </div>
+          <div class="inline-tools">
+            <label class="file-input" for="designPdbFile">上传结构文件</label>
+            <input id="designPdbFile" class="sr-only" type="file" accept=".pdb,.ent,.txt" />
+            <button id="clearDesignPdbBtn" class="ghost" type="button">清空结构文本</button>
+          </div>
+          <div class="field"><label for="designStructureText">结构文本（可选）</label><textarea id="designStructureText" placeholder="也可以直接粘贴 PDB 文本，用于让设计任务同时参考结构。"></textarea></div>
+          <div class="mode-panel-grid">
+            <div class="field"><label for="designFunctionKeywords">功能关键词（逗号分隔）</label><input id="designFunctionKeywords" type="text" placeholder="fluorescent protein, chromophore" /></div>
+            <div class="field"><label for="designAnnotationPreset">功能注释模板</label><input id="designAnnotationPreset" type="text" placeholder="例如 fluorescent protein" /></div>
+          </div>
+          <div class="inline-tools">
+            <button id="addDesignAnnotationBtn" class="ghost" type="button">插入多模态注释模板</button>
+            <button id="clearDesignAnnotationsBtn" class="ghost" type="button">清空多模态注释 JSON</button>
+          </div>
+          <div class="field"><label for="designFunctionAnnotations">功能注释 JSON（可选）</label><textarea id="designFunctionAnnotations" placeholder='例如：[{"label":"fluorescent protein","start":1,"end":128}]'></textarea></div>
+        </div>
+        <div id="inverseFoldPanel" class="mode-panel">
+          <div class="mode-help">逆折叠模式会调用 `POST /inverse_fold`。你可以填写服务器上的 PDB 路径，或者直接粘贴 PDB 文本。</div>
+          <div class="mode-panel-grid">
+            <div class="field"><label for="inversePdbPath">PDB 路径</label><input id="inversePdbPath" type="text" placeholder="/abs/path/to/example.pdb" /></div>
+            <div class="field"><label for="inverseCandidates">候选数</label><input id="inverseCandidates" type="number" min="1" max="64" value="2" /></div>
+            <div class="field"><label for="inverseTemperature">温度</label><input id="inverseTemperature" type="number" min="0.1" step="0.1" value="0.8" /></div>
+          </div>
+          <div class="mode-panel-grid">
+            <div class="field"><label for="inverseNumSteps">num_steps</label><input id="inverseNumSteps" type="number" min="1" max="512" value="1" /></div>
+          </div>
+          <div class="inline-tools">
+            <label class="file-input" for="inversePdbFile">上传 PDB 文件</label>
+            <input id="inversePdbFile" class="sr-only" type="file" accept=".pdb,.ent,.txt" />
+            <button id="clearPdbBtn" class="ghost" type="button">清空 PDB 文本</button>
+          </div>
+          <div class="field"><label for="inversePdbText">PDB 文本（可选）</label><textarea id="inversePdbText" placeholder="如果不想传路径，也可以直接粘贴 PDB 文本。"></textarea></div>
+        </div>
+        <div id="functionPanel" class="mode-panel">
+          <div class="mode-help">功能条件化模式会调用 `POST /generate_with_function`。可选输入基础序列、目标长度、功能关键词或显式区间注释。</div>
+          <div class="mode-panel-grid">
+            <div class="field"><label for="functionSequence">基础序列（可选）</label><input id="functionSequence" type="text" placeholder="留空则按长度生成 masked prompt" /></div>
+            <div class="field"><label for="functionSequenceLength">目标长度</label><input id="functionSequenceLength" type="number" min="1" max="4096" value="128" /></div>
+            <div class="field"><label for="functionCandidates">候选数</label><input id="functionCandidates" type="number" min="1" max="64" value="2" /></div>
+          </div>
+          <div class="mode-panel-grid">
+            <div class="field"><label for="functionTemperature">温度</label><input id="functionTemperature" type="number" min="0.1" step="0.1" value="0.8" /></div>
+            <div class="field"><label for="functionNumSteps">num_steps</label><input id="functionNumSteps" type="number" min="1" max="4096" value="8" /></div>
+            <div class="field"><label for="functionKeywords">功能关键词（逗号分隔）</label><input id="functionKeywords" type="text" placeholder="fluorescent protein, chromophore" /></div>
+          </div>
+          <div class="inline-tools">
+            <button id="addAnnotationBtn" class="ghost" type="button">插入注释模板</button>
+            <button id="clearAnnotationsBtn" class="ghost" type="button">清空注释 JSON</button>
+          </div>
+          <div class="field"><label for="functionAnnotations">显式注释 JSON（可选）</label><textarea id="functionAnnotations" placeholder='例如：[{"label":"fluorescent protein","start":1,"end":128}]'></textarea></div>
         </div>
         <div class="composer-row">
           <label class="toggle"><input id="carryBestToggle" type="checkbox" checked /> 自动带上上一轮最佳序列</label>
@@ -579,6 +700,10 @@
         <div class="diff-wrap"><div id="diffSummary" class="diff-summary">执行至少两次任务后，这里会高亮展示最佳序列之间的变化位点。</div><div id="diffBox" class="diff-box"><div class="empty-state">当前还没有可展示的序列差异。</div></div></div>
       </section>
       <section class="inspector-section">
+        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">代际统计</h3><span id="generationTag" class="chip" style="padding:6px 10px;">等待运行</span></div>
+        <div id="generationStatsBox" class="records"><div class="empty-state">执行迭代设计后，这里会显示每一代的种群统计与最佳分数。</div></div>
+      </section>
+      <section class="inspector-section">
         <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">候选历史</h3><span class="chip" style="padding:6px 10px;">Top Candidates</span></div>
         <div id="recordsBox" class="records"><div class="empty-state">执行任务后，这里会显示当前轮次内的候选及评分。</div></div>
       </section>
@@ -599,9 +724,44 @@
     const sendBtn = document.getElementById('sendBtn');
     const clearBtn = document.getElementById('clearBtn');
     const statusLine = document.getElementById('statusLine');
+    const modeCards = document.querySelectorAll('[data-mode]');
+    const designPanel = document.getElementById('designPanel');
+    const inverseFoldPanel = document.getElementById('inverseFoldPanel');
+    const functionPanel = document.getElementById('functionPanel');
     const maxIterationsEl = document.getElementById('maxIterations');
     const candidatesEl = document.getElementById('candidatesPerRound');
     const patienceEl = document.getElementById('patience');
+    const populationSizeEl = document.getElementById('populationSize');
+    const eliteSizeEl = document.getElementById('eliteSize');
+    const parentPoolSizeEl = document.getElementById('parentPoolSize');
+    const mutationsPerParentEl = document.getElementById('mutationsPerParent');
+    const designSequenceEl = document.getElementById('designSequence');
+    const designSequenceLengthEl = document.getElementById('designSequenceLength');
+    const designStructurePathEl = document.getElementById('designStructurePath');
+    const designStructureTextEl = document.getElementById('designStructureText');
+    const designPdbFileEl = document.getElementById('designPdbFile');
+    const clearDesignPdbBtn = document.getElementById('clearDesignPdbBtn');
+    const designFunctionKeywordsEl = document.getElementById('designFunctionKeywords');
+    const designAnnotationPresetEl = document.getElementById('designAnnotationPreset');
+    const designFunctionAnnotationsEl = document.getElementById('designFunctionAnnotations');
+    const addDesignAnnotationBtn = document.getElementById('addDesignAnnotationBtn');
+    const clearDesignAnnotationsBtn = document.getElementById('clearDesignAnnotationsBtn');
+    const inversePdbPathEl = document.getElementById('inversePdbPath');
+    const inversePdbTextEl = document.getElementById('inversePdbText');
+    const inversePdbFileEl = document.getElementById('inversePdbFile');
+    const clearPdbBtn = document.getElementById('clearPdbBtn');
+    const inverseCandidatesEl = document.getElementById('inverseCandidates');
+    const inverseTemperatureEl = document.getElementById('inverseTemperature');
+    const inverseNumStepsEl = document.getElementById('inverseNumSteps');
+    const functionSequenceEl = document.getElementById('functionSequence');
+    const functionSequenceLengthEl = document.getElementById('functionSequenceLength');
+    const functionCandidatesEl = document.getElementById('functionCandidates');
+    const functionTemperatureEl = document.getElementById('functionTemperature');
+    const functionNumStepsEl = document.getElementById('functionNumSteps');
+    const functionKeywordsEl = document.getElementById('functionKeywords');
+    const functionAnnotationsEl = document.getElementById('functionAnnotations');
+    const addAnnotationBtn = document.getElementById('addAnnotationBtn');
+    const clearAnnotationsBtn = document.getElementById('clearAnnotationsBtn');
     const carryBestToggle = document.getElementById('carryBestToggle');
     const summaryBox = document.getElementById('summaryBox');
     const recordsBox = document.getElementById('recordsBox');
@@ -620,11 +780,24 @@
     const diffSummary = document.getElementById('diffSummary');
     const diffBox = document.getElementById('diffBox');
     const diffTag = document.getElementById('diffTag');
+    const generationTag = document.getElementById('generationTag');
+    const generationStatsBox = document.getElementById('generationStatsBox');
 
     const conversation = [{ role: 'assistant', content: '你好，我是 ESM3 聊天式蛋白设计助手。你可以直接说“请自动设计 GFP 并迭代优化”，我会调用真实 ESM3，并把计划、最佳候选与可继续追问的上下文整理成聊天结果。' }];
+    let currentMode = 'design';
     let latestResult = null;
     let latestBestSequence = '';
     let previousBestSequence = '';
+
+    function setMode(mode) {
+      currentMode = mode;
+      modeCards.forEach((card) => card.classList.toggle('active', card.dataset.mode === mode));
+      designPanel.classList.toggle('active', mode === 'design');
+      inverseFoldPanel.classList.toggle('active', mode === 'inverse_fold');
+      functionPanel.classList.toggle('active', mode === 'function');
+      carryBestToggle.disabled = mode !== 'design';
+      refreshContextSeq();
+    }
 
     function getRecentTasks() {
       try {
@@ -663,7 +836,7 @@
         <button class="recent-item" type="button" data-index="${idx}">
           <strong>${item.title || '未命名任务'}</strong>
           <span>${item.preview || ''}</span>
-          <div class="recent-meta">${formatTime(item.timestamp)} · score ${Number(item.score ?? 0).toFixed(4)} · iter ${item.iteration ?? '-'}</div>
+          <div class="recent-meta">${formatTime(item.timestamp)} · ${item.mode || 'design'} · score ${Number(item.score ?? 0).toFixed(4)} · iter ${item.iteration ?? '-'}</div>
         </button>
       `).join('');
       recentList.querySelectorAll('.recent-item').forEach((button) => {
@@ -671,6 +844,7 @@
           const index = Number(button.dataset.index);
           const item = items[index];
           if (!item) return;
+          setMode(item.mode || 'design');
           promptEl.value = item.task || '';
           if (Number.isFinite(item.maxIterations)) maxIterationsEl.value = item.maxIterations;
           if (Number.isFinite(item.candidatesPerRound)) candidatesEl.value = item.candidatesPerRound;
@@ -687,6 +861,7 @@
         task,
         title: task.length > 24 ? `${task.slice(0, 24)}…` : task,
         preview: (best.sequence || '').slice(0, 48),
+        mode: currentMode,
         score: best.score ?? 0,
         iteration: best.iteration ?? '-',
         maxIterations: request.max_iterations,
@@ -738,6 +913,10 @@
     }
 
     function refreshContextSeq() {
+      if (currentMode !== 'design') {
+        contextSeq.textContent = '当前模式不使用“上一轮最佳序列自动继承”';
+        return;
+      }
       if (!carryBestToggle.checked) {
         contextSeq.textContent = '已关闭“自动带上上一轮最佳序列”';
         return;
@@ -750,16 +929,80 @@
     }
 
     function buildTask(content) {
+      if (currentMode !== 'design') return content;
       if (!carryBestToggle.checked || !latestBestSequence) return content;
       return `${content}\n\n上一轮最佳序列参考：${latestBestSequence}`;
     }
 
-    function buildRequest(content) {
+    function parseFunctionAnnotations() {
+      const raw = functionAnnotationsEl.value.trim();
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        throw new Error('显式注释 JSON 解析失败，请检查格式');
+      }
+    }
+
+    function parseDesignAnnotations() {
+      const raw = designFunctionAnnotationsEl.value.trim();
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        throw new Error('多模态功能注释 JSON 解析失败，请检查格式');
+      }
+    }
+
+    function buildModeRequest(content) {
+      if (currentMode === 'inverse_fold') {
+        return {
+          endpoint: '/inverse_fold',
+          requestBody: {
+            pdb_path: inversePdbPathEl.value.trim() || null,
+            pdb_text: inversePdbTextEl.value.trim() || null,
+            num_candidates: safeNumber(inverseCandidatesEl.value, 2),
+            temperature: safeNumber(inverseTemperatureEl.value, 0.8),
+            num_steps: safeNumber(inverseNumStepsEl.value, 1),
+          },
+        };
+      }
+
+      if (currentMode === 'function') {
+        return {
+          endpoint: '/generate_with_function',
+          requestBody: {
+            sequence: functionSequenceEl.value.trim() || null,
+            sequence_length: safeNumber(functionSequenceLengthEl.value, 128),
+            function_keywords: functionKeywordsEl.value.split(',').map((item) => item.trim()).filter(Boolean),
+            function_annotations: parseFunctionAnnotations(),
+            num_candidates: safeNumber(functionCandidatesEl.value, 2),
+            temperature: safeNumber(functionTemperatureEl.value, 0.8),
+            num_steps: safeNumber(functionNumStepsEl.value, 8),
+          },
+        };
+      }
+
       return {
-        task: buildTask(content),
-        max_iterations: safeNumber(maxIterationsEl.value, 3),
-        candidates_per_round: safeNumber(candidatesEl.value, 4),
-        patience: safeNumber(patienceEl.value, 2)
+        endpoint: '/design_protein',
+        requestBody: {
+          task: buildTask(content),
+          max_iterations: safeNumber(maxIterationsEl.value, 3),
+          candidates_per_round: safeNumber(candidatesEl.value, 4),
+          patience: safeNumber(patienceEl.value, 2),
+          population_size: safeNumber(populationSizeEl.value, 8),
+          elite_size: safeNumber(eliteSizeEl.value, 2),
+          parent_pool_size: safeNumber(parentPoolSizeEl.value, 4),
+          mutations_per_parent: safeNumber(mutationsPerParentEl.value, 3),
+          sequence: designSequenceEl.value.trim() || null,
+          sequence_length: designSequenceLengthEl.value.trim() ? safeNumber(designSequenceLengthEl.value, 128) : null,
+          pdb_path: designStructurePathEl.value.trim() || null,
+          pdb_text: designStructureTextEl.value.trim() || null,
+          function_keywords: designFunctionKeywordsEl.value.split(',').map((item) => item.trim()).filter(Boolean),
+          function_annotations: parseDesignAnnotations(),
+        },
       };
     }
 
@@ -768,6 +1011,19 @@
     }
 
     function summarizeResult(result) {
+      if (currentMode !== 'design') {
+        const best = result?.best_sequences;
+        const seqCount = result?.history?.length || 0;
+        const modeName = currentMode === 'inverse_fold' ? '逆折叠' : '功能条件化生成';
+        if (!best) {
+          return `${modeName}请求已执行，但没有返回可用序列。建议查看右侧完整 JSON。`;
+        }
+        return [
+          `${modeName}任务已执行完成。`,
+          `本次共返回 ${seqCount} 条候选序列。`,
+          `当前展示的是第一条候选序列，你可以继续调整参数再次尝试。`
+        ].join('\n');
+      }
       const best = result?.best_sequences;
       const records = result?.history || [];
       const plan = result?.plan || {};
@@ -811,6 +1067,33 @@
       return { changed, html };
     }
 
+    function normalizeResultForDisplay(result, content) {
+      if (currentMode === 'design') return result;
+      const sequences = Array.isArray(result?.sequences) ? result.sequences : [];
+      const bestSequence = sequences[0] || '';
+      return {
+        task: content,
+        plan: {
+          workflow: currentMode === 'inverse_fold' ? 'inverse_folding' : 'function_conditioned_generation',
+          target: currentMode === 'inverse_fold' ? 'structure_to_sequence' : 'function_conditioned_sequence',
+          max_iterations: '-',
+        },
+        history: sequences.map((sequence) => ({
+          sequence,
+          score: 0,
+          iteration: 1,
+          mutation_history: [currentMode],
+        })),
+        best_sequences: bestSequence ? {
+          sequence: bestSequence,
+          score: 0,
+          iteration: 1,
+          mutation_history: [currentMode],
+        } : null,
+        raw_result: result,
+      };
+    }
+
     function renderDiff(previousSeq, currentSeq) {
       if (!currentSeq || !previousSeq) {
         diffTag.textContent = '暂无对比';
@@ -828,9 +1111,13 @@
       const best = result?.best_sequences;
       const plan = result?.plan || {};
       const records = result?.history || [];
+      const inputContext = result?.input_context || {};
+      const generationStats = result?.generation_stats || [];
       if (!best) {
         summaryBox.innerHTML = '<div class="metric-card"><div class="metric-label">状态</div><div class="metric-value">等待任务…</div></div>';
         recordsBox.innerHTML = '<div class="empty-state">执行任务后，这里会显示当前轮次内的候选及评分。</div>';
+        generationTag.textContent = '等待运行';
+        generationStatsBox.innerHTML = '<div class="empty-state">执行迭代设计后，这里会显示每一代的种群统计与最佳分数。</div>';
         bestSequenceEl.value = '';
         jsonBox.textContent = '等待任务结果…';
         latestResult = null;
@@ -847,6 +1134,11 @@
       jsonBox.textContent = JSON.stringify(result, null, 2);
       refreshContextSeq();
       renderDiff(previousBestSequence, latestBestSequence);
+      const modalities = [
+        inputContext.input_sequence ? 'sequence' : null,
+        inputContext.input_pdb_path || inputContext.input_pdb_text ? 'structure' : null,
+        (inputContext.input_function_keywords || []).length || (inputContext.input_function_annotations || []).length ? 'function' : null,
+      ].filter(Boolean).join(', ') || 'text';
       summaryBox.innerHTML = [
         ['工作流', plan.workflow || '-'],
         ['目标', plan.target || '-'],
@@ -854,13 +1146,30 @@
         ['最佳轮次', String(best.iteration ?? '-')],
         ['候选记录数', String(records.length)],
         ['最大迭代', String(plan.max_iterations ?? '-')],
+        ['输入模态', modalities],
       ].map(([label, value]) => `<div class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`).join('');
       const items = topRecords(records);
       recordsBox.innerHTML = items.map((record, idx) => {
         const sequence = record.sequence || '-';
         const shortSeq = sequence.length > 76 ? `${sequence.slice(0, 76)}…` : sequence;
-        return `<div class="record-card"><strong>#${idx + 1} · score ${Number(record.score ?? 0).toFixed(4)}</strong><div class="record-meta">iteration ${record.iteration ?? '-'} · mutation_history ${(record.mutation_history || []).join(', ') || 'seed'}</div><div class="record-seq">${shortSeq}</div></div>`;
+        const modeClass = (record.mutation_history || [currentMode])[0] || currentMode;
+        return `<div class="record-card ${modeClass}"><strong>#${idx + 1} · score ${Number(record.score ?? 0).toFixed(4)}</strong><div class="record-meta">iteration ${record.iteration ?? '-'} · mutation_history ${(record.mutation_history || []).join(', ') || 'seed'}</div><div class="record-seq">${shortSeq}</div></div>`;
       }).join('');
+
+      if (generationStats.length) {
+        generationTag.textContent = `共 ${generationStats.length} 代`;
+        generationStatsBox.innerHTML = generationStats.map((stat) => `
+          <div class="record-card design">
+            <strong>第 ${stat.iteration} 代 · best ${Number(stat.best_score ?? 0).toFixed(4)}</strong>
+            <div class="record-meta">avg ${Number(stat.average_score ?? 0).toFixed(4)} · worst ${Number(stat.worst_score ?? 0).toFixed(4)} · population ${stat.population_size}</div>
+            <div class="record-meta">elite ${stat.elite_size} · parent_pool ${stat.parent_pool_size} · mutations ${stat.mutations_per_parent}</div>
+            <div class="record-seq">${(stat.best_sequence || '').slice(0, 90)}${(stat.best_sequence || '').length > 90 ? '…' : ''}</div>
+          </div>
+        `).join('');
+      } else {
+        generationTag.textContent = currentMode === 'design' ? '无代际数据' : '当前模式不适用';
+        generationStatsBox.innerHTML = '<div class="empty-state">当前结果没有代际统计可显示。</div>';
+      }
     }
 
     async function refreshStatus() {
@@ -895,12 +1204,13 @@
       renderConversation();
       if (!text) promptEl.value = '';
       setBusy(true, '正在调用真实 ESM3、生成候选并整理结果…');
-      const requestBody = buildRequest(content);
+      let modeRequest;
       try {
-        const resp = await fetch('/design_protein', {
+        modeRequest = buildModeRequest(content);
+        const resp = await fetch(modeRequest.endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
+          body: JSON.stringify(modeRequest.requestBody),
         });
         if (!resp.ok) {
           let detail = `HTTP ${resp.status}`;
@@ -910,10 +1220,11 @@
           } catch {}
           throw new Error(detail);
         }
-        const result = await resp.json();
-        renderSummary(result);
-        rememberTask(content, requestBody, result);
-        conversation.push({ role: 'assistant', content: summarizeResult(result) });
+        const rawResult = await resp.json();
+        const displayResult = normalizeResultForDisplay(rawResult, content);
+        renderSummary(displayResult);
+        rememberTask(content, modeRequest.requestBody, displayResult);
+        conversation.push({ role: 'assistant', content: summarizeResult(displayResult) });
         renderConversation();
       } catch (error) {
         conversation.push({ role: 'assistant', content: `任务执行失败：${error.message}` });
@@ -934,7 +1245,75 @@
       promptEl.focus();
     });
     carryBestToggle.addEventListener('change', refreshContextSeq);
+    modeCards.forEach((card) => card.addEventListener('click', () => setMode(card.dataset.mode)));
     quickButtons.forEach((button) => button.addEventListener('click', () => sendMessage(button.dataset.q)));
+    designPdbFileEl.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      designStructureTextEl.value = text;
+      if (!designStructurePathEl.value.trim()) {
+        designStructurePathEl.value = file.name;
+      }
+    });
+    clearDesignPdbBtn.addEventListener('click', () => {
+      designStructureTextEl.value = '';
+      designPdbFileEl.value = '';
+    });
+    addDesignAnnotationBtn.addEventListener('click', () => {
+      const label = designAnnotationPresetEl.value.trim() || 'fluorescent protein';
+      const example = [{ label, start: 1, end: safeNumber(designSequenceLengthEl.value, 128) }];
+      const current = designFunctionAnnotationsEl.value.trim();
+      if (!current) {
+        designFunctionAnnotationsEl.value = JSON.stringify(example, null, 2);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(current);
+        if (Array.isArray(parsed)) {
+          parsed.push(example[0]);
+          designFunctionAnnotationsEl.value = JSON.stringify(parsed, null, 2);
+        }
+      } catch {
+        designFunctionAnnotationsEl.value = JSON.stringify(example, null, 2);
+      }
+    });
+    clearDesignAnnotationsBtn.addEventListener('click', () => {
+      designFunctionAnnotationsEl.value = '';
+    });
+    inversePdbFileEl.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      inversePdbTextEl.value = text;
+      if (!inversePdbPathEl.value.trim()) {
+        inversePdbPathEl.value = file.name;
+      }
+    });
+    clearPdbBtn.addEventListener('click', () => {
+      inversePdbTextEl.value = '';
+      inversePdbFileEl.value = '';
+    });
+    addAnnotationBtn.addEventListener('click', () => {
+      const current = functionAnnotationsEl.value.trim();
+      const example = [{ label: 'fluorescent protein', start: 1, end: safeNumber(functionSequenceLengthEl.value, 128) }];
+      if (!current) {
+        functionAnnotationsEl.value = JSON.stringify(example, null, 2);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(current);
+        if (Array.isArray(parsed)) {
+          parsed.push(example[0]);
+          functionAnnotationsEl.value = JSON.stringify(parsed, null, 2);
+        }
+      } catch {
+        functionAnnotationsEl.value = JSON.stringify(example, null, 2);
+      }
+    });
+    clearAnnotationsBtn.addEventListener('click', () => {
+      functionAnnotationsEl.value = '';
+    });
     themeToggle.addEventListener('click', () => {
       const current = document.documentElement.getAttribute('data-theme') || 'light';
       applyTheme(current === 'dark' ? 'light' : 'dark');
@@ -962,6 +1341,7 @@
       }
     });
     applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+    setMode('design');
     renderConversation();
     renderSummary(null);
     renderRecentTasks();

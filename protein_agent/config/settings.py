@@ -87,6 +87,8 @@ class Settings:
     esm3_generate_entrypoint: str | None = None
     esm3_mutate_entrypoint: str | None = None
     esm3_structure_entrypoint: str | None = None
+    esm3_inverse_fold_entrypoint: str | None = None
+    esm3_function_generate_entrypoint: str | None = None
     esm3_extra_pythonpath: str | None = None
     request_timeout: int = 120
     allow_generated_python: bool = False
@@ -129,6 +131,8 @@ class Settings:
             esm3_generate_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_GENERATE_ENTRYPOINT")),
             esm3_mutate_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_MUTATE_ENTRYPOINT")),
             esm3_structure_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_STRUCTURE_ENTRYPOINT")),
+            esm3_inverse_fold_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_INVERSE_FOLD_ENTRYPOINT")),
+            esm3_function_generate_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_FUNCTION_GENERATE_ENTRYPOINT")),
             esm3_extra_pythonpath=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_EXTRA_PYTHONPATH")),
             request_timeout=_to_int(_env_get(data, "PROTEIN_AGENT_REQUEST_TIMEOUT"), defaults.request_timeout),
             allow_generated_python=_to_bool(

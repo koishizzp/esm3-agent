@@ -499,6 +499,8 @@ http://127.0.0.1:8080/
 - 自动展示计划、最佳序列、候选历史和完整 JSON
 - 支持将上一轮最佳序列自动带入下一轮任务描述
 - 支持深色模式、最近任务历史，以及最佳序列差异高亮
+- 支持在前端切换“迭代设计 / 逆折叠 / 功能条件化生成”三种任务模式
+- 逆折叠模式支持粘贴/上传 PDB，功能条件化模式支持关键词与注释 JSON 辅助编辑
 
 API 文档页面仍保留在：
 
@@ -658,6 +660,120 @@ tail -f logs/protein_agent.log
 - 再让 `protein_agent.api.main` 通过 HTTP 调它
 
 这就是当前仓库里已经改好的推荐路径。
+
+### 10.10 Phase 1 新增能力入口
+
+当前版本已经额外补了两项能力的后端与主 API 入口：
+
+- `POST /inverse_fold`
+- `POST /generate_with_function`
+
+### 10.11 多模态设计入口
+
+除了独立的 `inverse_fold` 与 `generate_with_function` 之外，当前版本还把多模态输入接入了主设计入口：
+
+- `POST /design_protein`
+
+现在这个接口除了 `task` 之外，还支持以下可选字段：
+
+- `sequence`
+- `sequence_length`
+- `pdb_path`
+- `pdb_text`
+- `function_keywords`
+- `function_annotations`
+
+这意味着你可以在一次请求中同时提交：
+
+- 文本目标
+- 参考序列
+- 结构文件 / 结构文本
+- 功能约束
+
+系统会优先尝试把这些多模态信息转成初始候选或种子序列，再进入后续的评估与迭代优化。
+
+最小示例：
+
+```bash
+curl -X POST http://127.0.0.1:8000/design_protein \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "task":"请基于给定结构和功能约束继续优化 GFP",
+    "sequence":"MSKGEELFTGVV",
+    "pdb_path":"/abs/path/to/example.pdb",
+    "function_keywords":["fluorescent protein"],
+    "sequence_length":128,
+    "max_iterations":3,
+    "candidates_per_round":4,
+    "patience":2
+  }'
+```
+
+聊天前端中的“迭代设计”模式也已经支持这组高级输入字段。
+
+也就是说，在浏览器工作台里你现在可以直接在“迭代设计”模式下填写：
+
+- 参考序列
+- 结构路径 / 结构文本 / 上传结构文件
+- 功能关键词
+- 功能注释 JSON
+
+这些输入都会一起进入同一个 `design_protein` 设计请求。
+
+在当前版本里，`design_protein` 还额外支持以下进化模拟参数：
+
+- `population_size`
+- `elite_size`
+- `parent_pool_size`
+- `mutations_per_parent`
+
+它们会驱动真正的种群式迭代，而不再只是简单的“top 候选 + 突变”循环。
+
+聊天前端中的“迭代设计”模式也已经支持这组进化模拟参数，并会在右侧展示每一代的统计信息。
+
+#### `POST /inverse_fold`
+
+用途：
+
+- 输入结构信息（当前优先支持 `pdb_path` 或 `pdb_text`）
+- 输出一个或多个候选序列
+
+最小示例：
+
+```bash
+curl -X POST http://127.0.0.1:8000/inverse_fold \
+  -H 'Content-Type: application/json' \
+  -d '{"pdb_path":"/abs/path/to/example.pdb","num_candidates":2,"temperature":0.7,"num_steps":1}'
+```
+
+#### `POST /generate_with_function`
+
+用途：
+
+- 输入功能标签或功能关键词
+- 在功能条件约束下生成候选序列
+
+最小示例：
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate_with_function \
+  -H 'Content-Type: application/json' \
+  -d '{"sequence_length":128,"function_keywords":["fluorescent protein"],"num_candidates":2,"temperature":0.8,"num_steps":8}'
+```
+
+也支持显式区间注释：
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate_with_function \
+  -H 'Content-Type: application/json' \
+  -d '{"sequence_length":128,"function_annotations":[{"label":"fluorescent protein","start":1,"end":128}],"num_candidates":2}'
+```
+
+#### 当前限制
+
+- `inverse_fold` 目前优先支持 `pdb_path` / `pdb_text`，还没有在前端聊天页单独做上传面板。
+- `generate_with_function` 已有 API，但聊天页还没有专门的“功能标签输入卡片”，现阶段更适合通过 `/docs` 或 curl 使用。
+- 这两项能力已经进入“可调通、可文档化、可直接测试”的状态，但还没像 GFP 迭代设计那样完全融入主聊天工作流。
 
 ### 10.8.1 冒烟测试
 

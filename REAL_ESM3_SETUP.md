@@ -43,6 +43,8 @@ export PROTEIN_AGENT_ESM3_MODEL_NAME=esm3_sm_open_v1
 export PROTEIN_AGENT_ESM3_GENERATE_ENTRYPOINT=/abs/path/to/script.py:generate
 export PROTEIN_AGENT_ESM3_MUTATE_ENTRYPOINT=/abs/path/to/script.py:mutate
 export PROTEIN_AGENT_ESM3_STRUCTURE_ENTRYPOINT=/abs/path/to/script.py:predict_structure
+export PROTEIN_AGENT_ESM3_INVERSE_FOLD_ENTRYPOINT=/abs/path/to/script.py:inverse_fold
+export PROTEIN_AGENT_ESM3_FUNCTION_GENERATE_ENTRYPOINT=/abs/path/to/script.py:generate_with_function
 ```
 
 ## 可选：启用 LLM 生成 Python 兜底
@@ -140,6 +142,33 @@ API 文档仍保留在：
 ```text
 http://127.0.0.1:8000/docs
 ```
+
+在当前版本里，除了 `POST /design_protein` 之外，你还可以在主 API 文档里直接看到两项新能力：
+
+- `POST /inverse_fold`
+- `POST /generate_with_function`
+
+同时，`POST /design_protein` 现在也支持多模态可选输入：
+
+- `sequence`
+- `pdb_path` / `pdb_text`
+- `function_keywords`
+- `function_annotations`
+- `sequence_length`
+
+也就是说，你可以在同一个设计请求里同时提供：
+
+- 文本任务目标
+- 参考序列
+- 结构信息
+- 功能约束
+
+系统会把这些上下文整合进同一个迭代设计流程中。
+
+它们分别对应：
+
+- 逆折叠（给定结构，生成候选序列）
+- 功能条件化生成（给定功能标签/关键词，生成候选序列）
 
 快速检查命令：
 
