@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from typing import Any
 
 import torch
@@ -20,6 +21,49 @@ from protein_agent.esm3_integration.bridge import (
 
 LOGGER = logging.getLogger(__name__)
 app = FastAPI(title="ESM3 Model Server", version="1.0.0")
+
+
+def ensure_runtime_data_layout() -> None:
+    root = os.getenv("PROTEIN_AGENT_ESM3_ROOT", "").strip()
+    data_dir = os.getenv("PROTEIN_AGENT_ESM3_DATA_DIR", "").strip()
+    if not data_dir:
+        if not root:
+            return
+        data_dir = os.path.join(root, "data")
+
+    function_dir = os.path.join(data_dir, "function")
+    filename = "uniref90_and_mgnify90_residue_annotations_gt_1k_proteins.csv"
+    source = os.path.join(function_dir, filename)
+    target = os.path.join(data_dir, filename)
+
+    if os.path.exists(target) or not os.path.exists(source):
+        return
+
+    try:
+        os.symlink(source, target)
+        LOGGER.info("Created compatibility symlink: %s -> %s", target, source)
+        return
+    except OSError:
+        pass
+
+    shutil.copy2(source, target)
+    LOGGER.info("Copied compatibility file: %s -> %s", source, target)
+
+
+def ensure_runtime_paths() -> None:
+    root = os.getenv("PROTEIN_AGENT_ESM3_ROOT", "").strip()
+    weights = os.getenv("PROTEIN_AGENT_ESM3_WEIGHTS_DIR", "").strip()
+    data = os.getenv("PROTEIN_AGENT_ESM3_DATA_DIR", "").strip()
+
+    if root and os.path.isdir(root):
+        os.chdir(root)
+        os.environ["ESM_SOURCE_PATH"] = root
+    if weights:
+        os.environ["ESM3_SNAPSHOT_DIR"] = weights
+    if data:
+        os.environ["LOCAL_DATA_PATH"] = data
+    os.environ.setdefault("INFRA_PROVIDER", "local")
+    ensure_runtime_data_layout()
 
 
 class GenerateRequest(BaseModel):
@@ -40,6 +84,7 @@ class StructureRequest(BaseModel):
 
 class ESM3Service:
     def __init__(self) -> None:
+        ensure_runtime_paths()
         configured = os.getenv("PROTEIN_AGENT_ESM3_DEVICE", "").strip()
         self.device = configured or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self._load_model()
@@ -96,6 +141,7 @@ SERVICE: ESM3Service | None = None
 @app.on_event("startup")
 def startup() -> None:
     global SERVICE
+    ensure_runtime_paths()
     SERVICE = ESM3Service()
 
 
@@ -108,6 +154,7 @@ def health() -> dict[str, Any]:
         "model": values.get("model"),
         "root": os.getenv("PROTEIN_AGENT_ESM3_ROOT", "").strip(),
         "project_dir": os.getenv("PROTEIN_AGENT_ESM3_PROJECT_DIR", "").strip(),
+        "cwd": os.getcwd(),
     }
 
 
