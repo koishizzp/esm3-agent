@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -33,23 +34,28 @@ def ensure_runtime_data_layout() -> None:
             return
         data_dir = os.path.join(root, "data")
 
-    function_dir = os.path.join(data_dir, "function")
-    filename = "uniref90_and_mgnify90_residue_annotations_gt_1k_proteins.csv"
-    source = os.path.join(function_dir, filename)
-    target = os.path.join(data_dir, filename)
-
-    if os.path.exists(target) or not os.path.exists(source):
+    data_path = Path(data_dir)
+    function_path = data_path / "function"
+    if not function_path.is_dir():
         return
 
-    try:
-        os.symlink(source, target)
-        LOGGER.info("Created compatibility symlink: %s -> %s", target, source)
-        return
-    except OSError:
-        pass
+    for source in function_path.iterdir():
+        if not source.is_file():
+            continue
 
-    shutil.copy2(source, target)
-    LOGGER.info("Copied compatibility file: %s -> %s", source, target)
+        target = data_path / source.name
+        if target.exists():
+            continue
+
+        try:
+            os.symlink(source, target)
+            LOGGER.info("Created compatibility symlink: %s -> %s", target, source)
+            continue
+        except OSError:
+            pass
+
+        shutil.copy2(source, target)
+        LOGGER.info("Copied compatibility file: %s -> %s", source, target)
 
 
 def ensure_runtime_paths() -> None:
