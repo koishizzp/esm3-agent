@@ -19,6 +19,8 @@ API_PORT="${PROTEIN_AGENT_API_PORT:-8000}"
 WAIT_TIMEOUT="${PROTEIN_AGENT_START_WAIT_TIMEOUT:-180}"
 ESM3_LOG="${PROTEIN_AGENT_ESM3_SERVER_LOG:-logs/esm3_server.log}"
 AGENT_LOG="${PROTEIN_AGENT_API_LOG:-logs/protein_agent.log}"
+ESM3_PID_FILE="${PROTEIN_AGENT_ESM3_SERVER_PID_FILE:-logs/esm3_server.pid}"
+AGENT_PID_FILE="${PROTEIN_AGENT_API_PID_FILE:-logs/protein_agent.pid}"
 
 export PROTEIN_AGENT_ESM3_BACKEND="http"
 export PROTEIN_AGENT_ESM3_SERVER_URL="http://127.0.0.1:${SERVER_PORT}"
@@ -39,6 +41,8 @@ cleanup() {
 
   wait "$AGENT_PID" >/dev/null 2>&1 || true
   wait "$ESM3_PID" >/dev/null 2>&1 || true
+
+  rm -f "$AGENT_PID_FILE" "$ESM3_PID_FILE"
 
   exit "$code"
 }
@@ -89,6 +93,7 @@ trap cleanup EXIT INT TERM
 echo "启动本地 ESM3 常驻服务..."
 bash ./start_esm3_server.sh >"$ESM3_LOG" 2>&1 &
 ESM3_PID=$!
+echo "$ESM3_PID" >"$ESM3_PID_FILE"
 
 if ! wait_for_service "ESM3 服务" "http://127.0.0.1:${SERVER_PORT}/health" "$WAIT_TIMEOUT" "$ESM3_PID"; then
   echo "最近的 ESM3 日志："
@@ -99,6 +104,7 @@ fi
 echo "启动 Protein Agent API..."
 bash ./start_agent.sh >"$AGENT_LOG" 2>&1 &
 AGENT_PID=$!
+echo "$AGENT_PID" >"$AGENT_PID_FILE"
 
 if ! wait_for_service "Agent API" "http://127.0.0.1:${API_PORT}/health" "$WAIT_TIMEOUT" "$AGENT_PID"; then
   echo "最近的 Agent 日志："
@@ -112,6 +118,8 @@ echo "- ESM3 服务:  http://127.0.0.1:${SERVER_PORT}"
 echo "- Agent API:  http://127.0.0.1:${API_PORT}"
 echo "- ESM3 日志:  $ESM3_LOG"
 echo "- Agent 日志: $AGENT_LOG"
+echo "- ESM3 PID:   $ESM3_PID_FILE"
+echo "- Agent PID:  $AGENT_PID_FILE"
 echo
 echo "按 Ctrl-C 可同时停止两个服务。"
 

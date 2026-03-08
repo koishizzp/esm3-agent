@@ -135,6 +135,9 @@ curl -X POST http://127.0.0.1:8000/design_protein \
 - `start_esm3_server.sh`：读取 `.env`，启动本地常驻 ESM3 服务。
 - `start_agent.sh`：读取 `.env`，启动 Python `protein_agent` API。
 - `start_all.sh`：一键启动上面两个服务，先等 ESM3 健康检查通过，再启动 Agent；按 `Ctrl-C` 会一起停止。
+- `stop_all.sh`：优先根据 PID 文件停止服务；如果 PID 文件不存在，会尝试按进程特征兜底查找并停止。
+- `status_all.sh`：显示两个服务的 PID、健康检查结果、日志位置，便于快速确认系统状态。
+- `smoke_test.sh`：运行一组最小真实链路测试，包括健康检查、ESM3 生成、结构预测和一次最小 Agent 任务。
 
 推荐用法：
 
@@ -162,7 +165,26 @@ chmod +x start_esm3_server.sh start_agent.sh
 - 等 `http://127.0.0.1:8001/health` 就绪
 - 再启动 Agent API
 - 把日志分别写到 `logs/esm3_server.log` 和 `logs/protein_agent.log`
+- 把 PID 分别写到 `logs/esm3_server.pid` 和 `logs/protein_agent.pid`
 - 当你按下 `Ctrl-C` 时一起清理两个进程
+
+如果你是把服务放到后台运行，也可以用下面这条命令停止：
+
+```bash
+./stop_all.sh
+```
+
+查看当前状态：
+
+```bash
+./status_all.sh
+```
+
+执行冒烟测试：
+
+```bash
+./smoke_test.sh
+```
 
 如果你想改监听端口，也可以临时覆盖：
 
@@ -175,4 +197,23 @@ PROTEIN_AGENT_API_PORT=8003 ./start_agent.sh
 
 ```bash
 PROTEIN_AGENT_ESM3_SERVER_PORT=8002 PROTEIN_AGENT_API_PORT=8003 ./start_all.sh
+```
+
+`status_all.sh` 和 `stop_all.sh` 也会读取同一份 `.env`，因此如果你修改了端口、日志路径或 PID 路径，状态检查和停止命令也会自动跟着走。
+
+`smoke_test.sh` 也会读取同一份 `.env`，并默认执行：
+
+- `GET /health`（ESM3 服务）
+- `GET /health`（Agent API）
+- `POST /generate_sequence`
+- `POST /predict_structure`
+- `POST /design_protein`（最小 GFP 任务）
+
+如果你想临时覆盖测试参数，也可以这样执行：
+
+```bash
+PROTEIN_AGENT_SMOKE_SEQUENCE=MSKGEELFTGVV \
+PROTEIN_AGENT_SMOKE_ITERATIONS=1 \
+PROTEIN_AGENT_SMOKE_CANDIDATES=2 \
+./smoke_test.sh
 ```

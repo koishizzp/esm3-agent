@@ -342,3 +342,307 @@ curl -X POST http://127.0.0.1:8000/design_protein \
 ---
 
 如果你愿意，我下一步可以继续把 README 再细化成“**你当前服务器部署参数**”的一键版（例如写成 `start_esm3.sh + start_agent.sh + smoke_test.sh`），并加入更贴近 GFP 的定制评分项。
+
+---
+
+## 10. 真实 ESM3 接入与运维手册（2026-03）
+
+这一节面向已经在服务器上部署好了 ESM3、希望 Agent 真正调到本地真实模型的使用者。
+
+### 10.1 推荐架构
+
+推荐把系统拆成两层：
+
+1. **本地常驻 ESM3 服务层**
+   - 负责模型加载、生成、突变、结构预测。
+   - 模型只在启动时加载一次，避免每轮迭代重复加载权重。
+   - 对外暴露：`/generate_sequence`、`/mutate_sequence`、`/predict_structure`、`/health`。
+
+2. **Protein Agent 编排层**
+   - 负责自然语言理解、计划生成、实验循环、候选筛选、打分与总结。
+   - 对外暴露：`/design_protein`、`/health`。
+   - 默认通过 HTTP 调上面的常驻 ESM3 服务。
+
+这样做的优势：
+
+- 模型只加载一次，启动后多轮实验更稳定。
+- Agent 不再承担模型初始化成本。
+- 后续把 ESM3 单独迁移到另一台机器也更容易。
+
+### 10.2 当前仓库里的关键文件
+
+- `protein_agent/esm3_server/server.py`
+  - 本地常驻 ESM3 服务入口。
+- `protein_agent/esm3_integration/client.py`
+  - 统一 ESM3 接入层，支持 `http`、`local`、`generated` 三种后端。
+- `protein_agent/esm3_integration/bridge.py`
+  - 本地部署桥接层，负责把你的 `esm3/` 仓库、`weights/`、`data/`、`projects/` 加入运行环境。
+- `protein_agent/agent/executor.py`
+  - 把 Agent 的 `generate` / `mutate` / `evaluate` 动作统一路由到 ESM3 客户端。
+- `protein_agent/workflows/gfp_optimizer.py`
+  - GFP 工作流，首轮默认使用 GFP scaffold 作为种子。
+- `.env`
+  - 当前推荐配置文件。
+- `start_esm3_server.sh` / `start_agent.sh` / `start_all.sh` / `stop_all.sh` / `status_all.sh`
+  - 启动、停止、状态检查脚本。
+
+### 10.3 你当前服务器的推荐配置
+
+如果你的服务器路径和当前会话里提供的一致，推荐核心变量如下：
+
+```bash
+PROTEIN_AGENT_ESM3_BACKEND=http
+PROTEIN_AGENT_ESM3_SERVER_URL=http://127.0.0.1:8001
+
+PROTEIN_AGENT_ESM3_PYTHON_PATH=/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python
+PROTEIN_AGENT_ESM3_ROOT=/mnt/disk3/tio_nekton4/esm3
+PROTEIN_AGENT_ESM3_PROJECT_DIR=/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction
+PROTEIN_AGENT_ESM3_WEIGHTS_DIR=/mnt/disk3/tio_nekton4/esm3/weights
+PROTEIN_AGENT_ESM3_DATA_DIR=/mnt/disk3/tio_nekton4/esm3/data
+PROTEIN_AGENT_ESM3_MODEL_NAME=esm3-open
+PROTEIN_AGENT_ESM3_DEVICE=cuda
+```
+
+解释：
+
+- `PROTEIN_AGENT_ESM3_BACKEND=http`
+  - 推荐值。Agent 不直接每次起 Python 子进程加载模型，而是请求常驻服务。
+- `PROTEIN_AGENT_ESM3_SERVER_URL`
+  - Agent 访问 ESM3 常驻服务的地址。
+- `PROTEIN_AGENT_ESM3_PYTHON_PATH`
+  - 能 `import torch` 和本地 `esm` 的 Python 解释器。
+- `PROTEIN_AGENT_ESM3_ROOT`
+  - 你的 `esm3/` 根目录。
+- `PROTEIN_AGENT_ESM3_PROJECT_DIR`
+  - GFP 项目目录，便于桥接层导入你已有项目脚本。
+- `PROTEIN_AGENT_ESM3_WEIGHTS_DIR` / `PROTEIN_AGENT_ESM3_DATA_DIR`
+  - 供本地模型加载和后续扩展使用。
+- `PROTEIN_AGENT_ESM3_MODEL_NAME`
+  - 当前默认使用 `esm3-open`。
+- `PROTEIN_AGENT_ESM3_DEVICE`
+  - 推荐 `cuda`，如果服务器显存不够可以改成 `cpu`，但会非常慢。
+
+### 10.4 推荐启动方式
+
+#### 方式一：一键启动
+
+```bash
+chmod +x start_esm3_server.sh start_agent.sh start_all.sh stop_all.sh status_all.sh
+./start_all.sh
+```
+
+这个命令会自动完成：
+
+- 读取 `.env`
+- 启动本地常驻 ESM3 服务
+- 轮询 `http://127.0.0.1:8001/health`
+- 等 ESM3 完全就绪后再启动 Agent
+- 记录日志和 PID 文件
+
+停止：
+
+```bash
+./stop_all.sh
+```
+
+查看状态：
+
+```bash
+./status_all.sh
+```
+
+#### 方式二：手动分两步启动
+
+先启动 ESM3：
+
+```bash
+./start_esm3_server.sh
+```
+
+再启动 Agent：
+
+```bash
+./start_agent.sh
+```
+
+这种方式适合你想分别看两个前台日志的场景。
+
+### 10.5 如何判断“已经真的接上真实 ESM3”
+
+至少满足下面三层检查：
+
+1. **旧服务检查不是关键**
+   - `curl http://127.0.0.1:8080/health`
+   - 这只能说明旧服务活着，不代表真实 ESM3 已经接上。
+
+2. **常驻 ESM3 服务必须正常**
+   - `curl http://127.0.0.1:8001/health`
+   - 它应该返回 `status`、`device`、`model`、`root`、`project_dir` 等信息。
+
+3. **Agent 必须能调用常驻 ESM3 服务**
+   - `curl http://127.0.0.1:8000/health`
+   - 再实际发一个 `/design_protein` 请求，确认不是只启动了 API 空壳。
+
+建议验证顺序：
+
+```bash
+curl http://127.0.0.1:8001/health
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/design_protein \
+  -H 'Content-Type: application/json' \
+  -d '{"task":"请自动设计 GFP 并迭代优化", "max_iterations": 3, "candidates_per_round": 4}'
+```
+
+### 10.6 日志、PID、状态文件说明
+
+默认情况下：
+
+- `logs/esm3_server.log`
+  - 本地常驻 ESM3 服务日志。
+- `logs/protein_agent.log`
+  - Agent API 日志。
+- `logs/esm3_server.pid`
+  - ESM3 服务 PID。
+- `logs/protein_agent.pid`
+  - Agent API PID。
+
+这些路径都可以通过 `.env` 里的可选变量覆盖。
+
+### 10.7 常见排障思路
+
+#### 1）`8001/health` 起不来
+
+优先怀疑：
+
+- `PROTEIN_AGENT_ESM3_PYTHON_PATH` 不对
+- `PROTEIN_AGENT_ESM3_ROOT` 不对
+- 本地 `esm` 包导入失败
+- 权重或 data 路径不对
+- CUDA/显存问题导致启动时加载模型失败
+
+先看：
+
+```bash
+tail -n 50 logs/esm3_server.log
+```
+
+#### 2）`8001/health` 正常，但 `8000/design_protein` 失败
+
+优先怀疑：
+
+- Agent 没有使用 `http` 后端
+- `PROTEIN_AGENT_ESM3_SERVER_URL` 不对
+- 结构预测或突变接口返回格式和预期不一致
+- 某些候选生成成功，但评分或结构预测失败
+
+先看：
+
+```bash
+tail -n 50 logs/protein_agent.log
+```
+
+#### 3）GFP 任务能跑，但结果质量一般
+
+这是“接通真实 ESM3”和“设计效果足够好”之间的区别。
+
+如果只是确认链路，先看能不能：
+
+- 正常生成候选
+- 正常做突变
+- 正常给出结构预测/评分
+- 正常迭代多轮
+
+等链路稳定后，再优化：
+
+- 候选数 `candidates_per_round`
+- 最大迭代轮数 `max_iterations`
+- prompt 设计
+- 你项目里的专用生成脚本/模板
+
+#### 4）是否应该启用 `PROTEIN_AGENT_ALLOW_GENERATED_PYTHON`
+
+建议顺序：
+
+1. 先跑通 `http` 常驻服务模式。
+2. 再确认本地项目是否真的需要 LLM 临时代码兜底。
+3. 只有在你明确接受这个风险时，再打开：
+
+```bash
+PROTEIN_AGENT_ALLOW_GENERATED_PYTHON=true
+```
+
+因为这个功能本质上是在你的 ESM3 环境里执行 LLM 生成的 Python。
+
+### 10.8 推荐日常命令
+
+启动：
+
+```bash
+./start_all.sh
+```
+
+检查：
+
+```bash
+./status_all.sh
+```
+
+停止：
+
+```bash
+./stop_all.sh
+```
+
+查看 ESM3 服务日志：
+
+```bash
+tail -f logs/esm3_server.log
+```
+
+查看 Agent 日志：
+
+```bash
+tail -f logs/protein_agent.log
+```
+
+### 10.9 当前建议结论
+
+对于你现在这套环境，**最佳实践不是让 Agent 每次直接本地加载模型**，而是：
+
+- 用 `protein_agent.esm3_server.server` 启一个常驻的真实 ESM3 服务
+- 再让 `protein_agent.api.main` 通过 HTTP 调它
+
+这就是当前仓库里已经改好的推荐路径。
+
+### 10.8.1 冒烟测试
+
+如果你想快速确认“真实 ESM3 服务 + Agent 编排链路”是否都正常，可以直接执行：
+
+```bash
+./smoke_test.sh
+```
+
+这个脚本会自动完成以下检查：
+
+- 访问 ESM3 服务健康检查接口
+- 访问 Agent API 健康检查接口
+- 直接调用一次 `POST /generate_sequence`
+- 直接调用一次 `POST /predict_structure`
+- 调用一次最小 `POST /design_protein` 任务
+
+默认测试参数比较保守：
+
+- 序列：`MSKGEELFTGVV`
+- 迭代轮数：`1`
+- 每轮候选数：`2`
+
+如果你想临时覆盖这些测试参数，可以这样：
+
+```bash
+PROTEIN_AGENT_SMOKE_SEQUENCE=MSKGEELFTGVV \
+PROTEIN_AGENT_SMOKE_ITERATIONS=1 \
+PROTEIN_AGENT_SMOKE_CANDIDATES=2 \
+./smoke_test.sh
+```
+
+如果冒烟测试失败，脚本会自动输出最近的 ESM3 日志和 Agent 日志，方便你继续定位。
