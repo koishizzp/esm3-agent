@@ -103,51 +103,52 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         data = _env_source()
-        max_iterations = min(_to_int(_env_get(data, "PROTEIN_AGENT_MAX_ITERATIONS"), 100), 100)
+        defaults = cls()
+        max_iterations = min(_to_int(_env_get(data, "PROTEIN_AGENT_MAX_ITERATIONS"), defaults.max_iterations), 100)
         return cls(
-            app_name=_env_get(data, "PROTEIN_AGENT_APP_NAME", cls.app_name) or cls.app_name,
-            log_level=_env_get(data, "PROTEIN_AGENT_LOG_LEVEL", cls.log_level) or cls.log_level,
-            llm_model=_env_get(data, "PROTEIN_AGENT_LLM_MODEL", cls.llm_model) or cls.llm_model,
+            app_name=_env_get(data, "PROTEIN_AGENT_APP_NAME", defaults.app_name) or defaults.app_name,
+            log_level=_env_get(data, "PROTEIN_AGENT_LOG_LEVEL", defaults.log_level) or defaults.log_level,
+            llm_model=_env_get(data, "PROTEIN_AGENT_LLM_MODEL", defaults.llm_model) or defaults.llm_model,
             openai_api_key=_to_optional_str(_env_get(data, "PROTEIN_AGENT_OPENAI_API_KEY")),
             openai_base_url=_to_optional_str(_env_get(data, "PROTEIN_AGENT_OPENAI_BASE_URL")),
-            esm3_backend=_env_get(data, "PROTEIN_AGENT_ESM3_BACKEND", cls.esm3_backend) or cls.esm3_backend,
+            esm3_backend=_env_get(data, "PROTEIN_AGENT_ESM3_BACKEND", defaults.esm3_backend) or defaults.esm3_backend,
             esm3_server_url=_to_optional_str(
-                _env_get(data, "PROTEIN_AGENT_ESM3_SERVER_URL"), cls.esm3_server_url
+                _env_get(data, "PROTEIN_AGENT_ESM3_SERVER_URL"), defaults.esm3_server_url
             ),
             esm3_server_api_key=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_SERVER_API_KEY")),
             esm3_server_headers_json=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_SERVER_HEADERS_JSON")),
-            esm3_python_path=_env_get(data, "PROTEIN_AGENT_ESM3_PYTHON_PATH", cls.esm3_python_path)
-            or cls.esm3_python_path,
+            esm3_python_path=_env_get(data, "PROTEIN_AGENT_ESM3_PYTHON_PATH", defaults.esm3_python_path)
+            or defaults.esm3_python_path,
             esm3_root=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_ROOT")),
             esm3_project_dir=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_PROJECT_DIR")),
             esm3_weights_dir=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_WEIGHTS_DIR")),
             esm3_data_dir=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_DATA_DIR")),
-            esm3_model_name=_env_get(data, "PROTEIN_AGENT_ESM3_MODEL_NAME", cls.esm3_model_name)
-            or cls.esm3_model_name,
+            esm3_model_name=_env_get(data, "PROTEIN_AGENT_ESM3_MODEL_NAME", defaults.esm3_model_name)
+            or defaults.esm3_model_name,
             esm3_device=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_DEVICE")),
             esm3_generate_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_GENERATE_ENTRYPOINT")),
             esm3_mutate_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_MUTATE_ENTRYPOINT")),
             esm3_structure_entrypoint=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_STRUCTURE_ENTRYPOINT")),
             esm3_extra_pythonpath=_to_optional_str(_env_get(data, "PROTEIN_AGENT_ESM3_EXTRA_PYTHONPATH")),
-            request_timeout=_to_int(_env_get(data, "PROTEIN_AGENT_REQUEST_TIMEOUT"), cls.request_timeout),
+            request_timeout=_to_int(_env_get(data, "PROTEIN_AGENT_REQUEST_TIMEOUT"), defaults.request_timeout),
             allow_generated_python=_to_bool(
-                _env_get(data, "PROTEIN_AGENT_ALLOW_GENERATED_PYTHON"), cls.allow_generated_python
+                _env_get(data, "PROTEIN_AGENT_ALLOW_GENERATED_PYTHON"), defaults.allow_generated_python
             ),
             generated_python_model=_to_optional_str(_env_get(data, "PROTEIN_AGENT_GENERATED_PYTHON_MODEL")),
             generated_python_timeout=_to_int(
-                _env_get(data, "PROTEIN_AGENT_GENERATED_PYTHON_TIMEOUT"), cls.generated_python_timeout
+                _env_get(data, "PROTEIN_AGENT_GENERATED_PYTHON_TIMEOUT"), defaults.generated_python_timeout
             ),
             default_candidates=_to_int(
-                _env_get(data, "PROTEIN_AGENT_DEFAULT_CANDIDATES"), cls.default_candidates
+                _env_get(data, "PROTEIN_AGENT_DEFAULT_CANDIDATES"), defaults.default_candidates
             ),
             default_mutations_per_round=_to_int(
-                _env_get(data, "PROTEIN_AGENT_DEFAULT_MUTATIONS_PER_ROUND"), cls.default_mutations_per_round
+                _env_get(data, "PROTEIN_AGENT_DEFAULT_MUTATIONS_PER_ROUND"), defaults.default_mutations_per_round
             ),
             default_patience=_to_int(
-                _env_get(data, "PROTEIN_AGENT_DEFAULT_PATIENCE"), cls.default_patience
+                _env_get(data, "PROTEIN_AGENT_DEFAULT_PATIENCE"), defaults.default_patience
             ),
             max_iterations=max_iterations,
-            use_gpu=_to_bool(_env_get(data, "PROTEIN_AGENT_USE_GPU"), cls.use_gpu),
+            use_gpu=_to_bool(_env_get(data, "PROTEIN_AGENT_USE_GPU"), defaults.use_gpu),
         )
 
 
