@@ -108,7 +108,7 @@ class ESM3Client:
             "generate_with_function",
             {
                 "sequence": sequence or "",
-                "sequence_length": sequence_length or 0,
+                "sequence_length": sequence_length,
                 "function_annotations": function_annotations or [],
                 "function_keywords": function_keywords or [],
                 "num_candidates": num_candidates,
