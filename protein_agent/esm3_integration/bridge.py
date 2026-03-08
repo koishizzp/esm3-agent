@@ -74,14 +74,49 @@ def normalize_sequences(raw: Any) -> list[str]:
     return []
 
 
+def first_non_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def to_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        item = value.item() if hasattr(value, "item") else value
+        return float(item)
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def serialize_structure(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool, list, dict)):
+        return value
+    if hasattr(value, "shape"):
+        shape = getattr(value, "shape", None)
+        try:
+            shape = list(shape) if shape is not None else None
+        except Exception:  # noqa: BLE001
+            shape = str(shape)
+        return {
+            "type": value.__class__.__name__,
+            "shape": shape,
+        }
+    return str(value)
+
+
 def normalize_structure(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         structure = raw.get("structure", raw)
-        confidence = float(raw.get("confidence", raw.get("plddt", 0.0)) or 0.0)
-        return {"structure": structure, "confidence": confidence}
+        confidence = to_float(first_non_none(raw.get("confidence"), raw.get("plddt")), 0.0)
+        return {"structure": serialize_structure(structure), "confidence": confidence}
     structure = getattr(raw, "structure", None)
-    confidence = float(getattr(raw, "confidence", getattr(raw, "plddt", 0.0)) or 0.0)
-    return {"structure": structure, "confidence": confidence}
+    confidence = to_float(first_non_none(getattr(raw, "confidence", None), getattr(raw, "plddt", None)), 0.0)
+    return {"structure": serialize_structure(structure), "confidence": confidence}
 
 
 def build_values(payload: dict[str, Any]) -> dict[str, Any]:
@@ -590,9 +625,11 @@ def sdk_predict_structure(model: Any, sequence: str, num_steps: int) -> dict[str
     protein = ESMProtein(sequence=sequence)
     config = GenerationConfig(track="structure", num_steps=max(1, num_steps))
     result = model.generate(protein, config)
+    structure = first_non_none(getattr(result, "coordinates", None), getattr(result, "structure", None))
+    confidence = first_non_none(getattr(result, "ptm", None), getattr(result, "confidence", None))
     return {
-        "structure": getattr(result, "coordinates", None) or getattr(result, "structure", None),
-        "confidence": float(getattr(result, "ptm", getattr(result, "confidence", 0.0)) or 0.0),
+        "structure": serialize_structure(structure),
+        "confidence": to_float(confidence, 0.0),
     }
 
 
