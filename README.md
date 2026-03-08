@@ -408,7 +408,7 @@ PROTEIN_AGENT_ESM3_ROOT=/mnt/disk3/tio_nekton4/esm3
 PROTEIN_AGENT_ESM3_PROJECT_DIR=/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction
 PROTEIN_AGENT_ESM3_WEIGHTS_DIR=/mnt/disk3/tio_nekton4/esm3/weights
 PROTEIN_AGENT_ESM3_DATA_DIR=/mnt/disk3/tio_nekton4/esm3/data
-PROTEIN_AGENT_ESM3_MODEL_NAME=esm3-open
+PROTEIN_AGENT_ESM3_MODEL_NAME=esm3_sm_open_v1
 PROTEIN_AGENT_ESM3_DEVICE=cuda
 ```
 
@@ -427,7 +427,7 @@ PROTEIN_AGENT_ESM3_DEVICE=cuda
 - `PROTEIN_AGENT_ESM3_WEIGHTS_DIR` / `PROTEIN_AGENT_ESM3_DATA_DIR`
   - 供本地模型加载和后续扩展使用。
 - `PROTEIN_AGENT_ESM3_MODEL_NAME`
-  - 当前默认使用 `esm3-open`。
+  - 对于你当前这套本地权重目录，推荐使用 `esm3_sm_open_v1`。
 - `PROTEIN_AGENT_ESM3_DEVICE`
   - 推荐 `cuda`，如果服务器显存不够可以改成 `cpu`，但会非常慢。
 

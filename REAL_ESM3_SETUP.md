@@ -34,7 +34,7 @@ export PROTEIN_AGENT_ESM3_ROOT=/abs/path/to/esm3
 export PROTEIN_AGENT_ESM3_PROJECT_DIR=/abs/path/to/esm3/projects/gfp_reproduction
 export PROTEIN_AGENT_ESM3_WEIGHTS_DIR=/abs/path/to/esm3/weights
 export PROTEIN_AGENT_ESM3_DATA_DIR=/abs/path/to/esm3/data
-export PROTEIN_AGENT_ESM3_MODEL_NAME=esm3-open
+export PROTEIN_AGENT_ESM3_MODEL_NAME=esm3_sm_open_v1
 ```
 
 如果你的项目里已经暴露了明确的可调用函数，也可以额外指定入口：
@@ -105,7 +105,7 @@ export PROTEIN_AGENT_ESM3_ROOT=/mnt/disk3/tio_nekton4/esm3
 export PROTEIN_AGENT_ESM3_PROJECT_DIR=/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction
 export PROTEIN_AGENT_ESM3_WEIGHTS_DIR=/mnt/disk3/tio_nekton4/esm3/weights
 export PROTEIN_AGENT_ESM3_DATA_DIR=/mnt/disk3/tio_nekton4/esm3/data
-export PROTEIN_AGENT_ESM3_MODEL_NAME=esm3-open
+export PROTEIN_AGENT_ESM3_MODEL_NAME=esm3_sm_open_v1
 export PROTEIN_AGENT_ESM3_DEVICE=cuda
 ```
 

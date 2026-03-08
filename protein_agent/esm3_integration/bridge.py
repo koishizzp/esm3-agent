@@ -90,6 +90,17 @@ def build_values(payload: dict[str, Any]) -> dict[str, Any]:
         or os.environ.get("PROTEIN_AGENT_ESM3_MODEL_NAME", "").strip()
         or "esm3-open"
     )
+    source_path = os.environ.get("PROTEIN_AGENT_ESM3_ROOT", "").strip() or None
+    weights_dir = os.environ.get("PROTEIN_AGENT_ESM3_WEIGHTS_DIR", "").strip() or None
+    data_dir = os.environ.get("PROTEIN_AGENT_ESM3_DATA_DIR", "").strip() or None
+    if not weights_dir and source_path:
+        candidate = Path(source_path) / "weights"
+        if candidate.exists():
+            weights_dir = str(candidate)
+    if not data_dir and source_path:
+        candidate = Path(source_path) / "data"
+        if candidate.exists():
+            data_dir = str(candidate)
     return {
         "prompt": payload.get("prompt") or payload.get("task") or payload.get("sequence") or "",
         "task": payload.get("task") or payload.get("prompt") or "",
@@ -103,14 +114,37 @@ def build_values(payload: dict[str, Any]) -> dict[str, Any]:
         "model_name": model_name,
         "name": model_name,
         "device": os.environ.get("PROTEIN_AGENT_ESM3_DEVICE", "").strip() or None,
-        "weights_dir": os.environ.get("PROTEIN_AGENT_ESM3_WEIGHTS_DIR", "").strip() or None,
-        "snapshot_dir": os.environ.get("PROTEIN_AGENT_ESM3_WEIGHTS_DIR", "").strip() or None,
-        "checkpoint_dir": os.environ.get("PROTEIN_AGENT_ESM3_WEIGHTS_DIR", "").strip() or None,
-        "data_dir": os.environ.get("PROTEIN_AGENT_ESM3_DATA_DIR", "").strip() or None,
-        "data_path": os.environ.get("PROTEIN_AGENT_ESM3_DATA_DIR", "").strip() or None,
-        "source_path": os.environ.get("PROTEIN_AGENT_ESM3_ROOT", "").strip() or None,
+        "weights_dir": weights_dir,
+        "snapshot_dir": weights_dir,
+        "checkpoint_dir": weights_dir,
+        "data_dir": data_dir,
+        "data_path": data_dir,
+        "source_path": source_path,
         "project_dir": os.environ.get("PROTEIN_AGENT_ESM3_PROJECT_DIR", "").strip() or None,
     }
+
+
+def canonical_model_name(model_name: str) -> str:
+    raw = (model_name or "").strip()
+    if not raw:
+        return "esm3_sm_open_v1"
+
+    try:
+        constants = importlib.import_module("esm.utils.constants.models")
+        normalize = getattr(constants, "normalize_model_name", None)
+        if callable(normalize):
+            return str(normalize(raw))
+    except Exception:  # noqa: BLE001
+        pass
+
+    lowered = raw.lower().replace("-", "_")
+    aliases = {
+        "esm3_open": "esm3_sm_open_v1",
+        "esm3_open_small": "esm3_sm_open_v1",
+        "esm3_sm_open": "esm3_sm_open_v1",
+        "esm3_sm_open_v1": "esm3_sm_open_v1",
+    }
+    return aliases.get(lowered, raw)
 
 
 ALIASES = {
@@ -354,8 +388,97 @@ def finalize_model(model: Any, values: dict[str, Any]) -> Any:
     return model
 
 
+def local_weight_files(values: dict[str, Any]) -> dict[str, Path]:
+    weights_dir_text = values.get("weights_dir") or ""
+    if not weights_dir_text:
+        return {}
+    weights_dir = Path(weights_dir_text)
+    files = {
+        "model": weights_dir / "esm3_sm_open_v1.pth",
+        "structure_encoder": weights_dir / "esm3_structure_encoder_v0.pth",
+        "structure_decoder": weights_dir / "esm3_structure_decoder_v0.pth",
+        "function_decoder": weights_dir / "esm3_function_decoder_v0.pth",
+    }
+    return files
+
+
+def build_local_open_small_model(values: dict[str, Any]) -> Any:
+    canonical = canonical_model_name(str(values.get("model") or ""))
+    if canonical != "esm3_sm_open_v1":
+        raise RuntimeError(f"manual local loader only supports esm3_sm_open_v1, got {canonical}")
+
+    files = local_weight_files(values)
+    if not files:
+        raise RuntimeError("weights_dir is not configured")
+    missing = [str(path) for path in files.values() if not path.exists()]
+    if missing:
+        raise RuntimeError("missing local weight files: " + ", ".join(missing))
+
+    try:
+        import torch
+        from esm.models.esm3 import ESM3
+        from esm.models.function_decoder import FunctionTokenDecoder
+        from esm.models.vqvae import StructureTokenDecoder, StructureTokenEncoder
+        from esm.tokenization import get_esm3_model_tokenizers
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"failed to import local ESM3 components: {exc}") from exc
+
+    source_root = Path(values.get("source_path") or "") if values.get("source_path") else None
+    previous_cwd = os.getcwd()
+    previous_provider = os.environ.get("INFRA_PROVIDER")
+    try:
+        if source_root is not None and source_root.exists():
+            os.chdir(source_root)
+        os.environ["INFRA_PROVIDER"] = previous_provider or "local"
+        tokenizers = get_esm3_model_tokenizers(canonical)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"failed to load tokenizers from local repo/data: {exc}") from exc
+    finally:
+        os.chdir(previous_cwd)
+        if previous_provider is None:
+            os.environ.pop("INFRA_PROVIDER", None)
+        else:
+            os.environ["INFRA_PROVIDER"] = previous_provider
+
+    def structure_encoder_fn() -> Any:
+        model = StructureTokenEncoder(
+            d_model=1024,
+            n_heads=1,
+            v_heads=128,
+            n_layers=2,
+            d_out=128,
+            n_codes=4096,
+        )
+        model.load_state_dict(torch.load(files["structure_encoder"], map_location="cpu"))
+        return model
+
+    def structure_decoder_fn() -> Any:
+        model = StructureTokenDecoder(d_model=1280, n_heads=20, n_layers=30)
+        model.load_state_dict(torch.load(files["structure_decoder"], map_location="cpu"))
+        return model
+
+    def function_decoder_fn() -> Any:
+        model = FunctionTokenDecoder(d_model=1536, n_heads=24, n_layers=3)
+        model.load_state_dict(torch.load(files["function_decoder"], map_location="cpu"))
+        return model
+
+    model = ESM3(
+        d_model=1536,
+        n_heads=24,
+        v_heads=256,
+        n_layers=48,
+        structure_encoder_fn=structure_encoder_fn,
+        structure_decoder_fn=structure_decoder_fn,
+        function_decoder_fn=function_decoder_fn,
+        tokenizers=tokenizers,
+    ).eval()
+    model.load_state_dict(torch.load(files["model"], map_location="cpu"))
+    return finalize_model(model, {**values, "model": canonical, "model_name": canonical, "name": canonical})
+
+
 def load_direct_model(payload: dict[str, Any]) -> Any:
     values = build_values(payload)
+    values = {**values, "model": canonical_model_name(str(values.get("model") or "")), "model_name": canonical_model_name(str(values.get("model") or "")), "name": canonical_model_name(str(values.get("model") or ""))}
     errors: list[str] = []
     try:
         module = importlib.import_module("esm.models.esm3")
@@ -366,27 +489,25 @@ def load_direct_model(payload: dict[str, Any]) -> Any:
     if esm3_cls is None:
         raise RuntimeError("esm.models.esm3 does not export ESM3")
 
+    try:
+        return build_local_open_small_model(values)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"manual local loader: {exc}")
+
     factories: list[tuple[str, Callable[..., Any], str]] = []
-    from_pretrained = getattr(esm3_cls, "from_pretrained", None)
-    if callable(from_pretrained):
-        factories.append(("ESM3.from_pretrained", from_pretrained, "load_model"))
-    if inspect.isclass(esm3_cls):
-        factories.append(("ESM3", esm3_cls, "load_model"))
 
     try:
         pretrained_module = importlib.import_module("esm.pretrained")
     except Exception:  # noqa: BLE001
         pretrained_module = None
     if pretrained_module is not None:
-        for name in dir(pretrained_module):
-            if name.startswith("_"):
-                continue
-            lower = name.lower()
-            if "esm3" not in lower and "pretrain" not in lower and "load" not in lower:
-                continue
-            fn = getattr(pretrained_module, name)
-            if callable(fn):
-                factories.append((f"esm.pretrained.{name}", fn, "load_model"))
+        load_local_model = getattr(pretrained_module, "load_local_model", None)
+        if callable(load_local_model):
+            factories.append(("esm.pretrained.load_local_model", load_local_model, "load_model"))
+
+    from_pretrained = getattr(esm3_cls, "from_pretrained", None)
+    if callable(from_pretrained):
+        factories.append(("ESM3.from_pretrained", from_pretrained, "load_model"))
 
     for name, factory, operation in factories:
         try:
@@ -398,9 +519,70 @@ def load_direct_model(payload: dict[str, Any]) -> Any:
     raise RuntimeError(" | ".join(errors[:12]) if errors else "no model factory available")
 
 
+def mask_sequence(sequence: str, count: int) -> str:
+    seq = list((sequence or "").strip().upper())
+    if not seq:
+        return ""
+    indices = [i for i, aa in enumerate(seq) if aa.isalpha()]
+    if not indices:
+        return "".join(seq)
+    count = max(1, min(count, len(indices)))
+    for idx in random.sample(indices, count):
+        seq[idx] = "_"
+    return "".join(seq)
+
+
+def sdk_generate_sequence(model: Any, prompt_sequence: str, temperature: float, num_steps: int) -> str:
+    from esm.sdk.api import ESMProtein, GenerationConfig
+
+    protein = ESMProtein(sequence=prompt_sequence)
+    config = GenerationConfig(
+        track="sequence",
+        num_steps=max(1, num_steps),
+        temperature=float(temperature),
+    )
+    result = model.generate(protein, config)
+    sequence = getattr(result, "sequence", None)
+    if not sequence:
+        raise RuntimeError("sdk generate returned empty sequence")
+    return str(sequence).strip().upper()
+
+
+def sdk_predict_structure(model: Any, sequence: str, num_steps: int) -> dict[str, Any]:
+    from esm.sdk.api import ESMProtein, GenerationConfig
+
+    protein = ESMProtein(sequence=sequence)
+    config = GenerationConfig(track="structure", num_steps=max(1, num_steps))
+    result = model.generate(protein, config)
+    return {
+        "structure": getattr(result, "coordinates", None) or getattr(result, "structure", None),
+        "confidence": float(getattr(result, "ptm", getattr(result, "confidence", 0.0)) or 0.0),
+    }
+
+
 def generate_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
     values = build_values(payload)
-    errors: list[str] = []
+    try:
+        sequences: list[str] = []
+        base = values["sequence"] or values["prompt"]
+        if not base:
+            raise RuntimeError("empty prompt sequence")
+        for _ in range(values["num_candidates"]):
+            prompt_sequence = base if "_" in base else mask_sequence(base, max(1, len(base) // 20))
+            sequence = sdk_generate_sequence(
+                model,
+                prompt_sequence=prompt_sequence,
+                temperature=values["temperature"],
+                num_steps=max(values["num_steps"], prompt_sequence.count("_")),
+            )
+            sequences.append(sequence)
+        if sequences:
+            return {"sequences": sequences, "entrypoint_used": "esm_sdk.generate(sequence)"}
+    except Exception as exc:  # noqa: BLE001
+        errors: list[str] = [f"esm_sdk.generate: {exc}"]
+    else:
+        errors = []
+
     for method_name in ["generate_sequences", "generate_sequence", "generate", "sample", "design", "predict"]:
         fn = getattr(model, method_name, None)
         if not callable(fn):
@@ -418,7 +600,27 @@ def generate_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
 
 def mutate_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
     values = build_values(payload)
-    errors: list[str] = []
+    sequence = values["sequence"]
+    if sequence:
+        try:
+            generated: list[str] = []
+            for _ in range(values["num_candidates"]):
+                prompt_sequence = mask_sequence(sequence, values["num_mutations"])
+                generated.append(
+                    sdk_generate_sequence(
+                        model,
+                        prompt_sequence=prompt_sequence,
+                        temperature=max(values["temperature"], 0.9),
+                        num_steps=max(values["num_steps"], values["num_mutations"]),
+                    )
+                )
+            if generated:
+                return {"sequences": generated, "entrypoint_used": "esm_sdk.masked_mutation"}
+        except Exception as exc:  # noqa: BLE001
+            errors: list[str] = [f"esm_sdk.masked_mutation: {exc}"]
+    else:
+        errors = []
+
     for method_name in ["mutate_sequence", "mutate", "generate_mutations", "design"]:
         fn = getattr(model, method_name, None)
         if not callable(fn):
@@ -452,7 +654,11 @@ def mutate_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
 
 def structure_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
     values = build_values(payload)
-    errors: list[str] = []
+    try:
+        return {**sdk_predict_structure(model, values["sequence"], max(values["num_steps"], 1)), "entrypoint_used": "esm_sdk.generate(structure)"}
+    except Exception as exc:  # noqa: BLE001
+        errors: list[str] = [f"esm_sdk.generate(structure): {exc}"]
+
     for method_name in ["predict_structure", "infer_structure", "fold", "predict"]:
         fn = getattr(model, method_name, None)
         if not callable(fn):
