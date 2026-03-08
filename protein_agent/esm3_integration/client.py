@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from openai import OpenAI
+
+try:
+    from openai import OpenAI
+except Exception:  # noqa: BLE001
+    OpenAI = None
 
 from protein_agent.config.settings import Settings
 
@@ -28,10 +32,15 @@ class ESM3Client:
         self.http.headers.update({"User-Agent": "esm3-agent/real-esm3"})
         self.codegen_client = None
         if settings.openai_api_key and settings.allow_generated_python:
-            self.codegen_client = OpenAI(
-                api_key=settings.openai_api_key,
-                base_url=settings.openai_base_url,
-            )
+            if OpenAI is None:
+                LOGGER.warning(
+                    "openai package is not installed; generated Python fallback is disabled"
+                )
+            else:
+                self.codegen_client = OpenAI(
+                    api_key=settings.openai_api_key,
+                    base_url=settings.openai_base_url,
+                )
 
     def generate(self, prompt: str, num_candidates: int = 4, temperature: float = 0.8) -> dict[str, Any]:
         return self._call(
@@ -185,7 +194,9 @@ class ESM3Client:
         previous_errors: list[str],
     ) -> dict[str, Any]:
         if not self.codegen_client:
-            raise RuntimeError("generated Python fallback is disabled or missing OpenAI credentials")
+            raise RuntimeError(
+                "generated Python fallback is disabled, missing OpenAI credentials, or openai package is not installed"
+            )
 
         prompt = {
             "goal": "Write Python code that talks to a locally deployed ESM3 stack and returns one JSON object.",

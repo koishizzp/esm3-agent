@@ -58,6 +58,13 @@ export PROTEIN_AGENT_LLM_MODEL=gpt-4o-mini
 
 这个能力默认是关闭的，因为它会在你配置好的 ESM3 环境里执行 LLM 生成的 Python。
 
+补充说明：
+
+- `openai` Python 包只在下面两种场景才是必需的：
+  - 你启用了 LLM 规划
+  - 或者你启用了 `PROTEIN_AGENT_ALLOW_GENERATED_PYTHON=true`
+- 如果你当前只是想跑“本地真实 ESM3 常驻服务 + HTTP Agent 编排”，即使环境里没有安装 `openai`，现在也可以正常启动。
+
 ## 如果还要继续精调，最有价值的信息
 
 如果后面还要继续做更深的定制，这几项信息最有用：

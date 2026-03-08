@@ -369,6 +369,15 @@ curl -X POST http://127.0.0.1:8000/design_protein \
 - Agent 不再承担模型初始化成本。
 - 后续把 ESM3 单独迁移到另一台机器也更容易。
 
+补充说明：
+
+- `openai` Python 包在当前架构里属于**可选依赖**。
+- 只有当你需要：
+  - 启用 LLM 规划；或
+  - 启用 `PROTEIN_AGENT_ALLOW_GENERATED_PYTHON=true` 的临时代码兜底
+  时，它才是必需的。
+- 如果你只是使用“本地真实 ESM3 常驻服务 + HTTP 调用”的推荐路径，没有安装 `openai` 也不应该阻止服务启动。
+
 ### 10.2 当前仓库里的关键文件
 
 - `protein_agent/esm3_server/server.py`
