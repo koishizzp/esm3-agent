@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from typing import Any
-import requests
+
+from protein_agent.esm3_integration import ESM3Client
 
 from .base import Tool
 
@@ -20,18 +21,12 @@ class ESM3MutateTool(Tool):
         "required": ["sequence"],
     }
 
-    def __init__(self, server_url: str, timeout: int = 120) -> None:
-        self.server_url = server_url.rstrip("/")
-        self.timeout = timeout
+    def __init__(self, client: ESM3Client) -> None:
+        self.client = client
 
     def execute(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        payload = {
-            "sequence": input_data["sequence"],
-            "num_mutations": input_data.get("num_mutations", 3),
-            "num_candidates": input_data.get("num_candidates", 4),
-        }
-        resp = requests.post(
-            f"{self.server_url}/mutate_sequence", json=payload, timeout=self.timeout
+        return self.client.mutate(
+            sequence=input_data["sequence"],
+            num_mutations=input_data.get("num_mutations", 3),
+            num_candidates=input_data.get("num_candidates", 4),
         )
-        resp.raise_for_status()
-        return resp.json()

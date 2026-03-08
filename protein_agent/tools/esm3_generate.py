@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from typing import Any
-import requests
+
+from protein_agent.esm3_integration import ESM3Client
 
 from .base import Tool
 
@@ -20,18 +21,12 @@ class ESM3GenerateTool(Tool):
         "required": ["prompt"],
     }
 
-    def __init__(self, server_url: str, timeout: int = 120) -> None:
-        self.server_url = server_url.rstrip("/")
-        self.timeout = timeout
+    def __init__(self, client: ESM3Client) -> None:
+        self.client = client
 
     def execute(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        payload = {
-            "prompt": input_data["prompt"],
-            "num_candidates": input_data.get("num_candidates", 4),
-            "temperature": input_data.get("temperature", 0.8),
-        }
-        resp = requests.post(
-            f"{self.server_url}/generate_sequence", json=payload, timeout=self.timeout
+        return self.client.generate(
+            prompt=input_data["prompt"],
+            num_candidates=input_data.get("num_candidates", 4),
+            temperature=input_data.get("temperature", 0.8),
         )
-        resp.raise_for_status()
-        return resp.json()

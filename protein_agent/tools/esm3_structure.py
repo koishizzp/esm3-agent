@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from typing import Any
-import requests
+
+from protein_agent.esm3_integration import ESM3Client
 
 from .base import Tool
 
@@ -16,15 +17,8 @@ class ESM3StructureTool(Tool):
         "required": ["sequence"],
     }
 
-    def __init__(self, server_url: str, timeout: int = 120) -> None:
-        self.server_url = server_url.rstrip("/")
-        self.timeout = timeout
+    def __init__(self, client: ESM3Client) -> None:
+        self.client = client
 
     def execute(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        resp = requests.post(
-            f"{self.server_url}/predict_structure",
-            json={"sequence": input_data["sequence"]},
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
-        return resp.json()
+        return self.client.predict_structure(sequence=input_data["sequence"])

@@ -15,14 +15,14 @@ class ExperimentLoopEngine:
         self.executor = executor
         self.memory = memory
 
-    def run(self, plan: dict[str, Any], task: str) -> dict[str, Any]:
+    def run(self, plan: dict[str, Any], task: str, seed_prompt: str | None = None) -> dict[str, Any]:
         max_iterations = min(int(plan.get("max_iterations", 20)), 100)
         patience = int(plan.get("patience", 8))
         candidates_per_round = int(plan.get("candidates_per_round", 8))
 
         no_improve_rounds = 0
         best_score = float("-inf")
-        seed_sequences = self.executor.generate(task, candidates_per_round)
+        seed_sequences = self.executor.generate(seed_prompt or task, candidates_per_round)
 
         for iteration in range(1, max_iterations + 1):
             LOGGER.info("Iteration %s started", iteration)

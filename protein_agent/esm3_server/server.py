@@ -3,17 +3,23 @@ from __future__ import annotations
 
 import logging
 import os
-import random
 from typing import Any
 
 import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from protein_agent.esm3_integration.bridge import (
+    build_values,
+    configure_paths,
+    generate_with_model,
+    load_direct_model,
+    mutate_with_model,
+    structure_with_model,
+)
+
 LOGGER = logging.getLogger(__name__)
 app = FastAPI(title="ESM3 Model Server", version="1.0.0")
-
-AMINO_ACIDS = "ACDEFGHIKLMNPQRSTVWY"
 
 
 class GenerateRequest(BaseModel):
@@ -34,60 +40,52 @@ class StructureRequest(BaseModel):
 
 class ESM3Service:
     def __init__(self) -> None:
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        configured = os.getenv("PROTEIN_AGENT_ESM3_DEVICE", "").strip()
+        self.device = configured or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self._load_model()
 
     def _load_model(self) -> Any:
-        try:
-            from esm.models.esm3 import ESM3
-        except Exception as exc:  # runtime dependency error
-            raise RuntimeError("Failed to import ESM3. Install esm package in this environment.") from exc
-
-        model_name = os.getenv("ESM3_MODEL_NAME", "esm3-open")
+        configure_paths()
+        model_name = (
+            os.getenv("PROTEIN_AGENT_ESM3_MODEL_NAME", "").strip()
+            or os.getenv("ESM3_MODEL_NAME", "").strip()
+            or "esm3-open"
+        )
         LOGGER.info("Loading ESM3 model '%s' on %s", model_name, self.device)
-        model = ESM3.from_pretrained(model_name)
-        model = model.to(self.device)
-        model.eval()
-        return model
+        payload = {"model": model_name}
+        return load_direct_model(payload)
 
     def generate(self, prompt: str, num_candidates: int, temperature: float) -> list[str]:
         try:
-            outputs = self.model.generate(
-                prompt,
-                num_steps=1,
-                temperature=temperature,
-                num_samples=num_candidates,
-            )
-            if isinstance(outputs, list):
-                return [o.sequence if hasattr(o, "sequence") else str(o) for o in outputs]
-            if hasattr(outputs, "sequence"):
-                return [outputs.sequence]
-            return [str(outputs)]
+            payload = {
+                "prompt": prompt,
+                "sequence": prompt,
+                "num_candidates": num_candidates,
+                "temperature": temperature,
+                "device": self.device,
+            }
+            return generate_with_model(self.model, payload)["sequences"]
         except Exception as exc:
             raise RuntimeError(f"ESM3 generation failed: {exc}") from exc
 
     def mutate(self, sequence: str, num_mutations: int, num_candidates: int) -> list[str]:
-        base = list(sequence.strip().upper())
-        variants = []
-        for _ in range(num_candidates):
-            mutated = base.copy()
-            for _ in range(num_mutations):
-                idx = random.randrange(len(mutated))
-                mutated[idx] = random.choice(AMINO_ACIDS)
-            mutated_prompt = "".join(mutated)
-            generated = self.generate(mutated_prompt, 1, temperature=0.9)
-            variants.append(generated[0])
-        return variants
+        try:
+            payload = {
+                "sequence": sequence,
+                "num_mutations": num_mutations,
+                "num_candidates": num_candidates,
+                "device": self.device,
+            }
+            return mutate_with_model(self.model, payload)["sequences"]
+        except Exception as exc:
+            raise RuntimeError(f"ESM3 mutation failed: {exc}") from exc
 
     def predict_structure(self, sequence: str) -> dict[str, Any]:
         try:
-            prediction = self.model.generate(sequence, track="structure", num_steps=1)
-            confidence = float(getattr(prediction, "confidence", 0.0))
-            return {
-                "structure": getattr(prediction, "structure", None),
-                "confidence": confidence,
-                "device": self.device,
-            }
+            payload = {"sequence": sequence, "device": self.device}
+            result = structure_with_model(self.model, payload)
+            result["device"] = self.device
+            return result
         except Exception as exc:
             raise RuntimeError(f"Structure prediction failed: {exc}") from exc
 
@@ -99,6 +97,18 @@ SERVICE: ESM3Service | None = None
 def startup() -> None:
     global SERVICE
     SERVICE = ESM3Service()
+
+
+@app.get("/health")
+def health() -> dict[str, Any]:
+    values = build_values({})
+    return {
+        "status": "ok",
+        "device": values.get("device") or (SERVICE.device if SERVICE else "unknown"),
+        "model": values.get("model"),
+        "root": os.getenv("PROTEIN_AGENT_ESM3_ROOT", "").strip(),
+        "project_dir": os.getenv("PROTEIN_AGENT_ESM3_PROJECT_DIR", "").strip(),
+    }
 
 
 @app.post("/generate_sequence")

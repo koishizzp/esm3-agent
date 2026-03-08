@@ -34,5 +34,4 @@ class GFPOptimizer:
                 "repeat",
             ],
         }
-        full_task = f"{task}. Use GFP scaffold: {GFP_SCAFFOLD}"
-        return self.loop_engine.run(plan=plan, task=full_task)
+        return self.loop_engine.run(plan=plan, task=task, seed_prompt=GFP_SCAFFOLD)
