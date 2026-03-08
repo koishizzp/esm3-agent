@@ -492,7 +492,7 @@ def build_local_open_small_model(values: dict[str, Any]) -> Any:
         return model
 
     def function_decoder_fn(device: Any) -> Any:
-        model = FunctionTokenDecoder(d_model=1536, n_heads=24, n_layers=3)
+        model = FunctionTokenDecoder()
         model.load_state_dict(torch.load(files["function_decoder"], map_location="cpu"))
         model = model.to(device)
         model.eval()
