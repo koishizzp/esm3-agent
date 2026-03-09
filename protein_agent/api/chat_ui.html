@@ -78,21 +78,20 @@
     }
     .workspace {
       min-height: 100vh;
-      height: 100vh;
       display: grid;
       grid-template-columns: 280px minmax(0, 1fr) 380px;
       gap: 18px;
       padding: 18px;
+      align-items: start;
     }
     .sidebar, .chat-shell, .inspector {
       min-height: 0;
-      height: calc(100vh - 36px);
       border: 1px solid var(--border);
       border-radius: var(--radius-xl);
       background: var(--panel);
       backdrop-filter: blur(12px);
       box-shadow: var(--shadow);
-      overflow: hidden;
+      overflow: visible;
     }
     .sidebar {
       display: grid;
@@ -224,7 +223,7 @@
     .empty-small { color: var(--muted); font-size: 12px; line-height: 1.5; }
     .chat-shell {
       display: grid;
-      grid-template-rows: auto auto minmax(240px, 1fr) auto;
+      grid-template-rows: auto auto auto auto;
       background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,251,255,0.96) 100%);
     }
     .topbar {
@@ -286,8 +285,8 @@
       display: flex;
       flex-direction: column;
       gap: 18px;
-      min-height: 0;
-      max-height: none;
+      min-height: 360px;
+      max-height: min(52vh, 640px);
       scroll-behavior: smooth;
       background:
         radial-gradient(circle at top, rgba(37, 99, 235, 0.05), transparent 26%),
@@ -346,10 +345,8 @@
       gap: 12px;
       position: relative;
       min-height: 0;
-      max-height: min(46vh, 560px);
-      overflow: auto;
-      overscroll-behavior: contain;
-      scrollbar-gutter: stable;
+      max-height: none;
+      overflow: visible;
     }
 
     :root[data-theme="dark"] .composer,
@@ -451,11 +448,11 @@
     .status-line { min-height: 20px; font-size: 13px; }
     .inspector {
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto;
       background: linear-gradient(180deg, rgba(255,255,255,0.97) 0%, rgba(247,250,255,0.97) 100%);
     }
     .inspector-section { padding-top: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
-    .inspector-section:last-child { border-bottom: none; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto 1fr; }
+    .inspector-section:last-child { border-bottom: none; }
     .inspector-title { margin: 0 0 12px; font-size: 16px; }
     .metric-card, .record-card { padding: 12px 14px; }
     .record-card.design { border-left: 4px solid rgba(37,99,235,0.55); }
@@ -542,7 +539,7 @@
     }
     .inspector-tabs {
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto auto;
       gap: 12px;
       min-height: 0;
     }
@@ -595,15 +592,15 @@
     }
     .inspector-panel {
       display: none;
-      height: 100%;
+      height: auto;
       min-height: 0;
     }
     .inspector-panel.active { display: block; }
     .inspector-panel-shell {
-      height: 100%;
+      height: auto;
       min-height: 0;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto auto;
     }
     .inspector-panel-head {
       padding: 14px 14px 0;
@@ -613,15 +610,16 @@
       min-height: 0;
       overflow: auto;
       padding: 14px;
+      max-height: 420px;
     }
     .inspector-panel-body.records {
       max-height: none;
       padding-right: 14px;
     }
     .inspector-panel .diff-wrap {
-      height: 100%;
+      height: auto;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto auto;
       border: none;
       border-radius: 0;
       background: transparent;
@@ -632,13 +630,13 @@
       border-bottom: 1px solid var(--border);
     }
     .inspector-panel .diff-box {
-      max-height: none;
+      max-height: 420px;
       min-height: 0;
       padding: 14px;
     }
     .inspector-panel pre {
-      max-height: none;
-      height: 100%;
+      max-height: 420px;
+      height: auto;
       border-radius: 0;
       padding: 16px;
     }
@@ -657,10 +655,10 @@
       .workspace { grid-template-columns: 240px minmax(0, 1fr) 340px; }
     }
     @media (max-width: 1120px) {
-      .workspace { grid-template-columns: 1fr; height: auto; }
+      .workspace { grid-template-columns: 1fr; }
       .sidebar, .chat-shell, .inspector { min-height: auto; height: auto; }
-      .chat-window { max-height: none; }
-      .chat-shell { grid-template-rows: auto auto minmax(280px, auto) auto; }
+      .chat-window { min-height: 300px; max-height: none; }
+      .chat-shell { grid-template-rows: auto auto auto auto; }
       .composer { max-height: none; overflow: visible; }
     }
     @media (max-width: 720px) {
