@@ -13,6 +13,7 @@ import requests
 
 from protein_agent.agent.executor import ToolExecutor
 from protein_agent.agent.planner import LLMPlanner
+from protein_agent.agent.reasoner import ResultReasoner
 from protein_agent.agent.workflow import ExperimentLoopEngine
 from protein_agent.config.settings import get_settings
 from protein_agent.memory.experiment_memory import ExperimentMemory
@@ -58,6 +59,19 @@ class DesignRequest(BaseModel):
     pdb_text: str | None = None
     function_annotations: list[FunctionAnnotationInput] | None = None
     function_keywords: list[str] | None = None
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatReasoningRequest(BaseModel):
+    message: str = Field(..., description="Natural-language follow-up question")
+    conversation: list[ChatMessage] = Field(default_factory=list)
+    latest_result: dict[str, Any] | None = None
+    current_mode: str = "design"
+    previous_best_sequence: str | None = None
 
 
 def build_multimodal_context(req: DesignRequest) -> dict[str, Any]:
@@ -172,6 +186,11 @@ def ui_status() -> dict[str, Any]:
     settings = get_settings()
     data: dict[str, Any] = {
         "agent": {"status": "ok", "app_name": settings.app_name},
+        "llm": {
+            "configured": bool(settings.openai_api_key),
+            "model": settings.llm_model,
+            "base_url_configured": bool(settings.openai_base_url),
+        },
         "esm3": {
             "configured_backend": settings.esm3_backend,
             "server_url": settings.esm3_server_url,
@@ -198,6 +217,24 @@ def ui_status() -> dict[str, Any]:
         data["esm3"]["status"] = "error"
         data["esm3"]["error"] = str(exc)
     return data
+
+
+@app.post("/chat_reasoning")
+def chat_reasoning(req: ChatReasoningRequest) -> dict[str, Any]:
+    settings = get_settings()
+    reasoner = ResultReasoner(settings)
+    try:
+        reply = reasoner.reply(
+            message=req.message,
+            latest_result=req.latest_result,
+            conversation=[item.model_dump() for item in req.conversation],
+            current_mode=req.current_mode,
+            previous_best_sequence=req.previous_best_sequence,
+        )
+        return {"reply": reply}
+    except Exception as exc:
+        LOGGER.exception("Chat reasoning failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/design_protein")

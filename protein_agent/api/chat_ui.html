@@ -78,13 +78,15 @@
     }
     .workspace {
       min-height: 100vh;
+      height: 100vh;
       display: grid;
       grid-template-columns: 280px minmax(0, 1fr) 380px;
       gap: 18px;
       padding: 18px;
     }
     .sidebar, .chat-shell, .inspector {
-      min-height: calc(100vh - 36px);
+      min-height: 0;
+      height: calc(100vh - 36px);
       border: 1px solid var(--border);
       border-radius: var(--radius-xl);
       background: var(--panel);
@@ -284,8 +286,8 @@
       display: flex;
       flex-direction: column;
       gap: 18px;
-      min-height: 420px;
-      max-height: calc(100vh - 280px);
+      min-height: 0;
+      max-height: none;
       background:
         radial-gradient(circle at top, rgba(37, 99, 235, 0.05), transparent 26%),
         linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(248,251,255,0.78) 100%);
@@ -337,10 +339,11 @@
     .composer {
       border-top: 1px solid var(--border);
       padding-top: 16px;
-      padding-bottom: 20px;
+      padding-bottom: 92px;
       background: rgba(255,255,255,0.94);
       display: grid;
       gap: 12px;
+      position: relative;
     }
 
     :root[data-theme="dark"] .composer,
@@ -369,6 +372,7 @@
     .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
     .composer-row { justify-content: space-between; }
+    .composer-row.actions-row { align-items: center; }
     .toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     .mode-card {
       border: 1px solid var(--border);
@@ -440,7 +444,7 @@
     .status-line { min-height: 20px; font-size: 13px; }
     .inspector {
       display: grid;
-      grid-template-rows: auto auto auto auto 1fr;
+      grid-template-rows: auto auto minmax(0, 1fr);
       background: linear-gradient(180deg, rgba(255,255,255,0.97) 0%, rgba(247,250,255,0.97) 100%);
     }
     .inspector-section { padding-top: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
@@ -453,7 +457,8 @@
     .metric-value { font-weight: 700; font-size: 15px; }
     .sequence-box textarea {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      min-height: 140px;
+      min-height: 96px;
+      max-height: 148px;
     }
     .records { overflow: auto; max-height: 100%; padding-right: 2px; }
     .record-seq {
@@ -512,12 +517,141 @@
       font-size: 13px;
       background: rgba(255,255,255,0.6);
     }
+    .floating-send-bar {
+      position: absolute;
+      right: 22px;
+      bottom: 20px;
+      z-index: 6;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .send-fab {
+      border-radius: 999px;
+      padding: 14px 20px;
+      box-shadow: 0 18px 34px rgba(37, 99, 235, 0.28);
+    }
+    .send-fab:disabled {
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.16);
+    }
+    .inspector-tabs {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 12px;
+      min-height: 0;
+    }
+    .inspector-tabbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    button.inspector-tab {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.86);
+      color: var(--text);
+      padding: 10px 12px;
+      text-align: left;
+      box-shadow: var(--shadow-soft);
+      min-height: 66px;
+      display: grid;
+      align-content: center;
+      gap: 4px;
+    }
+    button.inspector-tab:hover:not(:disabled) {
+      transform: none;
+      box-shadow: var(--shadow-soft);
+      border-color: var(--border-strong);
+    }
+    button.inspector-tab.active {
+      background: var(--primary-soft);
+      border-color: rgba(37,99,235,0.5);
+      color: var(--primary-strong);
+    }
+    .inspector-tab strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+    .inspector-tab small {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    button.inspector-tab.active small { color: var(--primary-strong); }
+    .inspector-panel-wrap {
+      min-height: 0;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.72);
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+    .inspector-panel {
+      display: none;
+      height: 100%;
+      min-height: 0;
+    }
+    .inspector-panel.active { display: block; }
+    .inspector-panel-shell {
+      height: 100%;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+    .inspector-panel-head {
+      padding: 14px 14px 0;
+      justify-content: space-between;
+    }
+    .inspector-panel-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px;
+    }
+    .inspector-panel-body.records {
+      max-height: none;
+      padding-right: 14px;
+    }
+    .inspector-panel .diff-wrap {
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .inspector-panel .diff-summary {
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .inspector-panel .diff-box {
+      max-height: none;
+      min-height: 0;
+      padding: 14px;
+    }
+    .inspector-panel pre {
+      max-height: none;
+      height: 100%;
+      border-radius: 0;
+      padding: 16px;
+    }
+    :root[data-theme="dark"] button.inspector-tab {
+      background: rgba(15,23,42,0.82);
+      color: var(--text);
+    }
+    :root[data-theme="dark"] button.inspector-tab.active {
+      background: rgba(96,165,250,0.16);
+      color: var(--primary-strong);
+    }
+    :root[data-theme="dark"] .inspector-panel-wrap {
+      background: rgba(2,6,23,0.28);
+    }
     @media (max-width: 1320px) {
       .workspace { grid-template-columns: 240px minmax(0, 1fr) 340px; }
     }
     @media (max-width: 1120px) {
-      .workspace { grid-template-columns: 1fr; }
-      .sidebar, .chat-shell, .inspector { min-height: auto; }
+      .workspace { grid-template-columns: 1fr; height: auto; }
+      .sidebar, .chat-shell, .inspector { min-height: auto; height: auto; }
       .chat-window { max-height: none; }
     }
     @media (max-width: 720px) {
@@ -525,6 +659,8 @@
       .sidebar-header, .nav-section, .sidebar-footer, .topbar, .context-bar, .composer, .inspector-section {
         padding-left: 16px; padding-right: 16px;
       }
+      .floating-send-bar { left: 16px; right: 16px; bottom: 14px; }
+      .send-fab { width: 100%; justify-content: center; }
       .composer-grid, .metric-grid, .mode-grid, .mode-panel-grid { grid-template-columns: 1fr; }
       .msg-row, .msg-row.user { grid-template-columns: 36px minmax(0, 1fr); }
       .msg-row.user .avatar, .msg-row.user .bubble-wrap { order: 0; }
@@ -549,6 +685,7 @@
         <div class="status-stack">
           <div class="status-pill"><span id="agentDot" class="status-dot"></span><div class="status-text"><strong>Agent API</strong><span id="agentStatus">检测中…</span></div></div>
           <div class="status-pill"><span id="esm3Dot" class="status-dot"></span><div class="status-text"><strong>ESM3 Runtime</strong><span id="esm3Status">检测中…</span></div></div>
+          <div class="status-pill"><span id="llmDot" class="status-dot"></span><div class="status-text"><strong>LLM Reasoner</strong><span id="llmStatus">检测中…</span></div></div>
         </div>
       </section>
       <section class="nav-section">
@@ -578,10 +715,10 @@
       <header class="topbar">
         <div>
           <h2 class="topbar-title">对话式蛋白设计</h2>
-          <p class="topbar-subtitle">发送目标、约束和优化方向；系统会把结构化计划、迭代结果和最佳序列整合成聊天回复。</p>
+          <p class="topbar-subtitle">发送目标、约束和优化方向；设计请求会执行工作流，解释型追问会自动切到结果分析链路。</p>
         </div>
         <div class="topbar-actions">
-          <div class="chip">端点 <code>/design_protein</code></div>
+          <div class="chip">端点 <code>/design_protein</code> + <code>/chat_reasoning</code></div>
           <div class="chip">真实模型 <code>esm3_sm_open_v1</code></div>
         </div>
       </header>
@@ -679,37 +816,53 @@
             <button class="secondary" data-q="请自动设计 GFP，避免使用 C，并做更严格筛选">避免 C + 严格筛选</button>
           </div>
         </div>
-        <div class="composer-row">
+        <div class="composer-row actions-row">
           <div id="statusLine" class="status-line"></div>
-          <div style="display:flex; gap:10px; flex-wrap:wrap;"><button id="clearBtn" class="ghost" type="button">清空会话</button><button id="sendBtn" type="button">发送任务</button></div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;"><button id="clearBtn" class="ghost" type="button">清空会话</button></div>
         </div>
+        <div class="floating-send-bar"><button id="sendBtn" class="send-fab" type="button">发送任务</button></div>
       </section>
     </main>
 
     <aside class="inspector">
-      <section class="inspector-section">
+      <section class="inspector-section inspector-overview">
         <h3 class="inspector-title">最新结果摘要</h3>
         <div id="summaryBox" class="metric-grid"><div class="metric-card"><div class="metric-label">状态</div><div class="metric-value">等待任务…</div></div></div>
       </section>
-      <section class="inspector-section sequence-box">
+      <section class="inspector-section sequence-box inspector-sequence">
         <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">最佳序列</h3><button id="copySeqBtn" class="secondary" type="button">复制序列</button></div>
         <textarea id="bestSequence" readonly placeholder="执行任务后，这里会显示当前最佳序列。"></textarea>
       </section>
-      <section class="inspector-section">
-        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">与上一轮最佳序列的差异</h3><span id="diffTag" class="chip" style="padding:6px 10px;">暂无对比</span></div>
-        <div class="diff-wrap"><div id="diffSummary" class="diff-summary">执行至少两次任务后，这里会高亮展示最佳序列之间的变化位点。</div><div id="diffBox" class="diff-box"><div class="empty-state">当前还没有可展示的序列差异。</div></div></div>
-      </section>
-      <section class="inspector-section">
-        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">代际统计</h3><span id="generationTag" class="chip" style="padding:6px 10px;">等待运行</span></div>
-        <div id="generationStatsBox" class="records"><div class="empty-state">执行迭代设计后，这里会显示每一代的种群统计与最佳分数。</div></div>
-      </section>
-      <section class="inspector-section">
-        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">候选历史</h3><span class="chip" style="padding:6px 10px;">Top Candidates</span></div>
-        <div id="recordsBox" class="records"><div class="empty-state">执行任务后，这里会显示当前轮次内的候选及评分。</div></div>
-      </section>
-      <section class="inspector-section">
-        <div class="sequence-tools"><h3 class="inspector-title" style="margin:0;">完整 JSON</h3><button id="copyJsonBtn" class="secondary" type="button">复制 JSON</button></div>
-        <pre id="jsonBox">等待任务结果…</pre>
+      <section class="inspector-section inspector-tabs">
+        <div class="inspector-tabbar" role="tablist" aria-label="结果详情切换">
+          <button class="inspector-tab active" type="button" role="tab" aria-selected="true" data-inspector-tab="records"><strong>候选历史</strong><small id="recordsTag">等待运行</small></button>
+          <button class="inspector-tab" type="button" role="tab" aria-selected="false" data-inspector-tab="diff"><strong>序列差异</strong><small id="diffTag">暂无对比</small></button>
+          <button class="inspector-tab" type="button" role="tab" aria-selected="false" data-inspector-tab="generation"><strong>代际统计</strong><small id="generationTag">等待运行</small></button>
+          <button class="inspector-tab" type="button" role="tab" aria-selected="false" data-inspector-tab="json"><strong>完整 JSON</strong><small id="jsonTag">等待结果</small></button>
+        </div>
+        <div class="inspector-panel-wrap">
+          <section class="inspector-panel active" data-inspector-panel="records">
+            <div class="inspector-panel-shell">
+              <div class="sequence-tools inspector-panel-head"><h3 class="inspector-title" style="margin:0;">候选历史</h3><span class="chip" style="padding:6px 10px;">Top Candidates</span></div>
+              <div id="recordsBox" class="records inspector-panel-body"><div class="empty-state">执行任务后，这里会显示当前轮次内的候选及评分。</div></div>
+            </div>
+          </section>
+          <section class="inspector-panel" data-inspector-panel="diff">
+            <div class="diff-wrap"><div id="diffSummary" class="diff-summary">执行至少两次任务后，这里会高亮展示最佳序列之间的变化位点。</div><div id="diffBox" class="diff-box"><div class="empty-state">当前还没有可展示的序列差异。</div></div></div>
+          </section>
+          <section class="inspector-panel" data-inspector-panel="generation">
+            <div class="inspector-panel-shell">
+              <div class="sequence-tools inspector-panel-head"><h3 class="inspector-title" style="margin:0;">代际统计</h3><span class="chip" style="padding:6px 10px;">Evolution</span></div>
+              <div id="generationStatsBox" class="records inspector-panel-body"><div class="empty-state">执行迭代设计后，这里会显示每一代的种群统计与最佳分数。</div></div>
+            </div>
+          </section>
+          <section class="inspector-panel" data-inspector-panel="json">
+            <div class="inspector-panel-shell">
+              <div class="sequence-tools inspector-panel-head"><h3 class="inspector-title" style="margin:0;">完整 JSON</h3><button id="copyJsonBtn" class="secondary" type="button">复制 JSON</button></div>
+              <pre id="jsonBox" class="inspector-panel-body">等待任务结果…</pre>
+            </div>
+          </section>
+        </div>
       </section>
     </aside>
   </div>
@@ -774,20 +927,39 @@
     const agentStatus = document.getElementById('agentStatus');
     const esm3Dot = document.getElementById('esm3Dot');
     const esm3Status = document.getElementById('esm3Status');
+    const llmDot = document.getElementById('llmDot');
+    const llmStatus = document.getElementById('llmStatus');
     const contextSeq = document.getElementById('contextSeq');
     const themeToggle = document.getElementById('themeToggle');
     const recentList = document.getElementById('recentList');
     const diffSummary = document.getElementById('diffSummary');
     const diffBox = document.getElementById('diffBox');
     const diffTag = document.getElementById('diffTag');
+    const recordsTag = document.getElementById('recordsTag');
     const generationTag = document.getElementById('generationTag');
     const generationStatsBox = document.getElementById('generationStatsBox');
+    const jsonTag = document.getElementById('jsonTag');
+    const inspectorTabs = document.querySelectorAll('[data-inspector-tab]');
+    const inspectorPanels = document.querySelectorAll('[data-inspector-panel]');
 
     const conversation = [{ role: 'assistant', content: '你好，我是 ESM3 聊天式蛋白设计助手。你可以直接说“请自动设计 GFP 并迭代优化”，我会调用真实 ESM3，并把计划、最佳候选与可继续追问的上下文整理成聊天结果。' }];
     let currentMode = 'design';
     let latestResult = null;
     let latestBestSequence = '';
     let previousBestSequence = '';
+    let currentInspectorTab = 'records';
+
+    function setInspectorTab(tab) {
+      currentInspectorTab = tab;
+      inspectorTabs.forEach((button) => {
+        const active = button.dataset.inspectorTab === tab;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      inspectorPanels.forEach((panel) => {
+        panel.classList.toggle('active', panel.dataset.inspectorPanel === tab);
+      });
+    }
 
     function setMode(mode) {
       currentMode = mode;
@@ -934,6 +1106,20 @@
       return `${content}\n\n上一轮最佳序列参考：${latestBestSequence}`;
     }
 
+    function buildConversationContext(limit = 8) {
+      return conversation.slice(-limit).map((item) => ({ role: item.role, content: item.content }));
+    }
+
+    function isReasoningQuery(content) {
+      const text = (content || '').trim();
+      if (!text) return false;
+      const reasoningPattern = /(解释|分析|为什么|为何|理由|依据|怎么看|评价|总结|概括|对比|比较|是否值得|适合验证|更适合|优先验证|风险|下一步|候选)/i;
+      const actionPattern = /(自动设计|设计|生成|优化|迭代|继续优化|继续跑|重新|再来|筛选|打分|突变|逆折叠|inverse fold|function-conditioned|功能条件)/i;
+      if (!reasoningPattern.test(text)) return false;
+      if (/(当前|这个|该|上一轮|候选|最佳序列|结果)/i.test(text)) return true;
+      return !actionPattern.test(text);
+    }
+
     function parseFunctionAnnotations() {
       const raw = functionAnnotationsEl.value.trim();
       if (!raw) return [];
@@ -956,10 +1142,12 @@
       }
     }
 
-    function buildModeRequest(content) {
+    function buildExecutionRequest(content) {
       if (currentMode === 'inverse_fold') {
         return {
+          kind: 'execution',
           endpoint: '/inverse_fold',
+          busyText: '正在执行逆折叠并整理候选结果…',
           requestBody: {
             pdb_path: inversePdbPathEl.value.trim() || null,
             pdb_text: inversePdbTextEl.value.trim() || null,
@@ -972,7 +1160,9 @@
 
       if (currentMode === 'function') {
         return {
+          kind: 'execution',
           endpoint: '/generate_with_function',
+          busyText: '正在执行功能条件生成并整理候选结果…',
           requestBody: {
             sequence: functionSequenceEl.value.trim() || null,
             sequence_length: safeNumber(functionSequenceLengthEl.value, 128),
@@ -986,7 +1176,9 @@
       }
 
       return {
+        kind: 'execution',
         endpoint: '/design_protein',
+        busyText: '正在调用真实 ESM3、生成候选并整理结果…',
         requestBody: {
           task: buildTask(content),
           max_iterations: safeNumber(maxIterationsEl.value, 3),
@@ -1006,6 +1198,28 @@
       };
     }
 
+    function buildReasoningRequest(content) {
+      return {
+        kind: 'reasoning',
+        endpoint: '/chat_reasoning',
+        busyText: '正在分析当前结果并生成解释…',
+        requestBody: {
+          message: content,
+          conversation: buildConversationContext(),
+          latest_result: latestResult,
+          current_mode: currentMode,
+          previous_best_sequence: previousBestSequence || null,
+        },
+      };
+    }
+
+    function buildAgentRequest(content) {
+      if (isReasoningQuery(content)) {
+        return buildReasoningRequest(content);
+      }
+      return buildExecutionRequest(content);
+    }
+
     function topRecords(records, limit = 6) {
       return [...(records || [])].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, limit);
     }
@@ -1019,21 +1233,41 @@
           return `${modeName}请求已执行，但没有返回可用序列。建议查看右侧完整 JSON。`;
         }
         return [
-          `${modeName}任务已执行完成。`,
-          `本次共返回 ${seqCount} 条候选序列。`,
-          `当前展示的是第一条候选序列，你可以继续调整参数再次尝试。`
+          `${modeName}结果已经出来了。`,
+          `这次共返回 ${seqCount} 条候选序列，当前先展示分组里的首条结果。`,
+          '如果你愿意，我也可以继续解释为什么它值得优先验证，或者帮你比较不同候选。'
         ].join('\n');
       }
       const best = result?.best_sequences;
       const records = result?.history || [];
       const plan = result?.plan || {};
-      if (!best) return '任务已执行，但没有解析到最佳序列。建议查看右侧完整 JSON 进一步排查。';
+      const generationStats = result?.generation_stats || [];
+      if (!best) return '这次任务已经执行，但我还没解析到可靠的最佳序列。建议先看右侧完整 JSON 排查返回结构。';
+      const ranked = topRecords(records, 2);
+      const gap = ranked.length > 1 ? Number((ranked[0].score ?? 0) - (ranked[1].score ?? 0)).toFixed(4) : null;
+      const firstGen = generationStats[0]?.best_score;
+      const lastGen = generationStats[generationStats.length - 1]?.best_score;
       return [
-        '任务已执行完成。',
-        `工作流：${plan.workflow || 'iterative_protein_optimization'}；目标：${plan.target || 'protein'}。`,
-        `本次共记录 ${records.length} 条候选，当前最佳候选来自第 ${best.iteration ?? '-'} 轮，score = ${Number(best.score ?? 0).toFixed(4)}。`,
-        '你可以继续追问，例如“基于上一轮最佳序列继续优化，并加强筛选标准”。'
+        `这一轮已经跑完，当前排在最前面的候选来自第 ${best.iteration ?? '-'} 轮，score = ${Number(best.score ?? 0).toFixed(4)}。`,
+        gap !== null
+          ? `它和当前第二名之间还有 ${gap} 的分数差，所以不是勉强领先。`
+          : `当前可直接比较的候选不多，所以它先作为默认优先候选。`,
+        generationStats.length > 1
+          ? `从第 1 代到第 ${generationStats.length} 代，best score 由 ${Number(firstGen ?? 0).toFixed(4)} 提升到 ${Number(lastGen ?? 0).toFixed(4)}。`
+          : `这次工作流是 ${plan.workflow || 'iterative_protein_optimization'}，目标是 ${plan.target || 'protein'}。`,
+        '你现在可以继续追问，例如“请解释为什么当前候选更适合验证”或“帮我比较前两名候选”。'
       ].join('\n');
+    }
+
+    function friendlyErrorMessage(error, request) {
+      const message = error?.message || '未知错误';
+      if (message === 'Failed to fetch') {
+        if (request?.kind === 'reasoning') {
+          return '浏览器没有连上当前 Agent 服务，所以解释请求没有真正发出去。请确认页面是由后端服务提供，并检查 `/health` 与 `/ui/status`。';
+        }
+        return '浏览器没有连上当前 Agent 服务或执行接口，所以任务没有真正发出去。请确认后端服务仍在运行，并检查 `/health` 与 `/ui/status`。';
+      }
+      return message;
     }
 
     function diffSequences(previousSeq, currentSeq) {
@@ -1116,10 +1350,12 @@
       if (!best) {
         summaryBox.innerHTML = '<div class="metric-card"><div class="metric-label">状态</div><div class="metric-value">等待任务…</div></div>';
         recordsBox.innerHTML = '<div class="empty-state">执行任务后，这里会显示当前轮次内的候选及评分。</div>';
+        recordsTag.textContent = '等待运行';
         generationTag.textContent = '等待运行';
         generationStatsBox.innerHTML = '<div class="empty-state">执行迭代设计后，这里会显示每一代的种群统计与最佳分数。</div>';
         bestSequenceEl.value = '';
         jsonBox.textContent = '等待任务结果…';
+        jsonTag.textContent = '等待结果';
         latestResult = null;
         latestBestSequence = '';
         previousBestSequence = '';
@@ -1139,22 +1375,22 @@
         inputContext.input_pdb_path || inputContext.input_pdb_text ? 'structure' : null,
         (inputContext.input_function_keywords || []).length || (inputContext.input_function_annotations || []).length ? 'function' : null,
       ].filter(Boolean).join(', ') || 'text';
+      const maxIterationsLabel = [undefined, null, '', '-'].includes(plan.max_iterations) ? '' : ` / ${plan.max_iterations}`;
       summaryBox.innerHTML = [
-        ['工作流', plan.workflow || '-'],
-        ['目标', plan.target || '-'],
+        ['任务类型', `${plan.workflow || '-'} · ${plan.target || '-'}`],
         ['最佳分数', Number(best.score ?? 0).toFixed(4)],
-        ['最佳轮次', String(best.iteration ?? '-')],
-        ['候选记录数', String(records.length)],
-        ['最大迭代', String(plan.max_iterations ?? '-')],
-        ['输入模态', modalities],
+        ['最佳轮次', `${best.iteration ?? '-'}${maxIterationsLabel}`],
+        ['候选记录', `${records.length} 条 · ${modalities}`],
       ].map(([label, value]) => `<div class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`).join('');
       const items = topRecords(records);
-      recordsBox.innerHTML = items.map((record, idx) => {
+      recordsTag.textContent = records.length ? `${Math.min(items.length, records.length)} / ${records.length} 条` : '暂无候选';
+      jsonTag.textContent = '已更新';
+      recordsBox.innerHTML = items.length ? items.map((record, idx) => {
         const sequence = record.sequence || '-';
         const shortSeq = sequence.length > 76 ? `${sequence.slice(0, 76)}…` : sequence;
         const modeClass = (record.mutation_history || [currentMode])[0] || currentMode;
         return `<div class="record-card ${modeClass}"><strong>#${idx + 1} · score ${Number(record.score ?? 0).toFixed(4)}</strong><div class="record-meta">iteration ${record.iteration ?? '-'} · mutation_history ${(record.mutation_history || []).join(', ') || 'seed'}</div><div class="record-seq">${shortSeq}</div></div>`;
-      }).join('');
+      }).join('') : '<div class="empty-state">当前结果没有候选历史可显示。</div>';
 
       if (generationStats.length) {
         generationTag.textContent = `共 ${generationStats.length} 代`;
@@ -1178,6 +1414,13 @@
         const data = await resp.json();
         agentDot.className = 'status-dot ok';
         agentStatus.textContent = `${data.agent?.app_name || 'Protein Agent'} 正常`;
+        if (data.llm?.configured) {
+          llmDot.className = 'status-dot ok';
+          llmStatus.textContent = `${data.llm?.model || 'unknown'} · 已连接`;
+        } else {
+          llmDot.className = 'status-dot warn';
+          llmStatus.textContent = `${data.llm?.model || 'unknown'} · 未配置外部 LLM，解释走本地分析`;
+        }
         if (data.esm3?.status === 'ok') {
           esm3Dot.className = 'status-dot ok';
           const health = data.esm3?.health || {};
@@ -1192,6 +1435,8 @@
       } catch (error) {
         agentDot.className = 'status-dot error';
         agentStatus.textContent = 'Agent 状态获取失败';
+        llmDot.className = 'status-dot error';
+        llmStatus.textContent = `LLM 状态获取失败：${error.message}`;
         esm3Dot.className = 'status-dot error';
         esm3Status.textContent = `ESM3 状态获取失败：${error.message}`;
       }
@@ -1203,14 +1448,14 @@
       conversation.push({ role: 'user', content });
       renderConversation();
       if (!text) promptEl.value = '';
-      setBusy(true, '正在调用真实 ESM3、生成候选并整理结果…');
-      let modeRequest;
+      let request;
       try {
-        modeRequest = buildModeRequest(content);
-        const resp = await fetch(modeRequest.endpoint, {
+        request = buildAgentRequest(content);
+        setBusy(true, request.busyText);
+        const resp = await fetch(request.endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(modeRequest.requestBody),
+          body: JSON.stringify(request.requestBody),
         });
         if (!resp.ok) {
           let detail = `HTTP ${resp.status}`;
@@ -1220,14 +1465,20 @@
           } catch {}
           throw new Error(detail);
         }
-        const rawResult = await resp.json();
-        const displayResult = normalizeResultForDisplay(rawResult, content);
+        const payload = await resp.json();
+        if (request.kind === 'reasoning') {
+          conversation.push({ role: 'assistant', content: payload.reply || '我已经完成分析，但这次没有拿到可显示的回复文本。' });
+          renderConversation();
+          return;
+        }
+        const displayResult = normalizeResultForDisplay(payload, content);
         renderSummary(displayResult);
-        rememberTask(content, modeRequest.requestBody, displayResult);
+        rememberTask(content, request.requestBody, displayResult);
         conversation.push({ role: 'assistant', content: summarizeResult(displayResult) });
         renderConversation();
       } catch (error) {
-        conversation.push({ role: 'assistant', content: `任务执行失败：${error.message}` });
+        const prefix = request?.kind === 'reasoning' ? '解释请求失败' : '任务执行失败';
+        conversation.push({ role: 'assistant', content: `${prefix}：${friendlyErrorMessage(error, request)}` });
         renderConversation();
       } finally {
         setBusy(false);
@@ -1247,6 +1498,7 @@
     carryBestToggle.addEventListener('change', refreshContextSeq);
     modeCards.forEach((card) => card.addEventListener('click', () => setMode(card.dataset.mode)));
     quickButtons.forEach((button) => button.addEventListener('click', () => sendMessage(button.dataset.q)));
+    inspectorTabs.forEach((button) => button.addEventListener('click', () => setInspectorTab(button.dataset.inspectorTab)));
     designPdbFileEl.addEventListener('change', async (event) => {
       const file = event.target.files?.[0];
       if (!file) return;
@@ -1341,6 +1593,7 @@
       }
     });
     applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+    setInspectorTab(currentInspectorTab);
     setMode('design');
     renderConversation();
     renderSummary(null);

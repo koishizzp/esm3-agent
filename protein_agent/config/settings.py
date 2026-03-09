@@ -35,6 +35,13 @@ def _env_get(data: dict[str, str], name: str, default: str | None = None) -> str
     return data.get(name, default)
 
 
+def _env_get_first(data: dict[str, str], names: list[str], default: str | None = None) -> str | None:
+    for name in names:
+        if name in data:
+            return data[name]
+    return default
+
+
 def _to_bool(value: str | None, default: bool) -> bool:
     if value is None:
         return default
@@ -110,9 +117,10 @@ class Settings:
         return cls(
             app_name=_env_get(data, "PROTEIN_AGENT_APP_NAME", defaults.app_name) or defaults.app_name,
             log_level=_env_get(data, "PROTEIN_AGENT_LOG_LEVEL", defaults.log_level) or defaults.log_level,
-            llm_model=_env_get(data, "PROTEIN_AGENT_LLM_MODEL", defaults.llm_model) or defaults.llm_model,
-            openai_api_key=_to_optional_str(_env_get(data, "PROTEIN_AGENT_OPENAI_API_KEY")),
-            openai_base_url=_to_optional_str(_env_get(data, "PROTEIN_AGENT_OPENAI_BASE_URL")),
+            llm_model=_env_get_first(data, ["PROTEIN_AGENT_LLM_MODEL", "OPENAI_MODEL"], defaults.llm_model)
+            or defaults.llm_model,
+            openai_api_key=_to_optional_str(_env_get_first(data, ["PROTEIN_AGENT_OPENAI_API_KEY", "OPENAI_API_KEY"])),
+            openai_base_url=_to_optional_str(_env_get_first(data, ["PROTEIN_AGENT_OPENAI_BASE_URL", "OPENAI_BASE_URL"])),
             esm3_backend=_env_get(data, "PROTEIN_AGENT_ESM3_BACKEND", defaults.esm3_backend) or defaults.esm3_backend,
             esm3_server_url=_to_optional_str(
                 _env_get(data, "PROTEIN_AGENT_ESM3_SERVER_URL"), defaults.esm3_server_url

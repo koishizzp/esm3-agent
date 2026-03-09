@@ -807,3 +807,180 @@ PROTEIN_AGENT_SMOKE_CANDIDATES=2 \
 ```
 
 如果冒烟测试失败，脚本会自动输出最近的 ESM3 日志和 Agent 日志，方便你继续定位。
+
+### 10.9 第三方客户端连续追问（`reasoning_context`）
+
+如果你是通过 OpenAI 兼容接口 `POST /v1/chat/completions` 来接入，而不是直接使用内置聊天页，推荐按下面的方式实现“先设计、再解释、再继续追问”。
+
+#### 响应里新增了什么
+
+现在 `POST /v1/chat/completions` 的响应除了标准的 `choices[0].message.content` 之外，还会额外返回：
+
+- `chat_mode`
+  - `execution`：这次主要是在跑设计/生成。
+  - `reasoning`：这次主要是在解释当前结果，而不是重新跑设计。
+- `reasoning_context`
+  - 一个可直接缓存并在下一轮原样回传的上下文对象。
+  - 用来让服务端知道“当前正在围绕哪一批候选继续解释”。
+
+典型响应片段示例：
+
+```json
+{
+  "id": "chatcmpl-...",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "这一轮已经跑完，当前排在最前面的候选来自第 3 轮……"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "chat_mode": "execution",
+  "best_candidate": {
+    "id": "cand-3-1",
+    "sequence": "MSKGEEL...",
+    "score": 0.9132,
+    "round": 3
+  },
+  "total_generated": 12,
+  "rounds": 3,
+  "reasoning_context": {
+    "version": 1,
+    "chat_mode": "execution",
+    "current_mode": "design",
+    "latest_result": {
+      "request": {
+        "target_protein": "GFP",
+        "num_candidates": 4,
+        "rounds": 3
+      },
+      "best_candidate": {
+        "id": "cand-3-1",
+        "sequence": "MSKGEEL...",
+        "score": 0.9132,
+        "round": 3
+      },
+      "all_candidates": [
+        { "id": "cand-3-1", "score": 0.9132 },
+        { "id": "cand-2-4", "score": 0.9011 }
+      ],
+      "total_generated": 12,
+      "rounds": 3
+    },
+    "previous_best_sequence": "MSKGEEL...",
+    "latest_best_sequence": "MSKGEEL..."
+  }
+}
+```
+
+#### 最推荐的客户端做法
+
+1. 第一次请求只发送正常的 `messages`。
+2. 收到响应后，缓存整段 `reasoning_context`。
+3. 当用户继续追问“为什么这个候选更适合验证”“帮我比较前两名候选”时：
+   - 把新的用户消息继续追加到 `messages`
+   - 同时把上一次响应里的 `reasoning_context` 原样回传
+4. 服务端会优先把这次请求视为“解释型追问”，而不是重新跑设计。
+
+#### 最小请求示例：先跑设计
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "esm3-protein-design-agent",
+    "messages": [
+      {
+        "role": "user",
+        "content": "请自动设计 GFP，并迭代优化，尽量保留 GSG motif"
+      }
+    ]
+  }'
+```
+
+这一步结束后，请把响应中的 `reasoning_context` 缓存起来。
+
+#### 最小请求示例：继续追问解释
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "esm3-protein-design-agent",
+    "messages": [
+      {
+        "role": "user",
+        "content": "请自动设计 GFP，并迭代优化，尽量保留 GSG motif"
+      },
+      {
+        "role": "assistant",
+        "content": "这一轮已经跑完，当前排在最前面的候选来自第 3 轮……"
+      },
+      {
+        "role": "user",
+        "content": "请解释为什么当前候选更适合验证"
+      }
+    ],
+    "reasoning_context": {
+      "version": 1,
+      "chat_mode": "execution",
+      "current_mode": "design",
+      "latest_result": {
+        "request": {
+          "target_protein": "GFP",
+          "num_candidates": 4,
+          "rounds": 3
+        },
+        "best_candidate": {
+          "id": "cand-3-1",
+          "sequence": "MSKGEEL...",
+          "score": 0.9132,
+          "round": 3
+        },
+        "all_candidates": [
+          { "id": "cand-3-1", "score": 0.9132 },
+          { "id": "cand-2-4", "score": 0.9011 }
+        ],
+        "total_generated": 12,
+        "rounds": 3
+      },
+      "previous_best_sequence": "MSKGEEL...",
+      "latest_best_sequence": "MSKGEEL..."
+    }
+  }'
+```
+
+#### 兼容字段说明
+
+为了兼容旧客户端，目前服务端仍然接受下面两种方式：
+
+- 推荐：只传 `reasoning_context`
+- 兼容旧写法：继续传顶层的
+  - `latest_result`
+  - `previous_best_sequence`
+
+如果两者同时存在，服务端会优先合并使用，不要求你立刻升级所有客户端。
+
+#### 什么时候会进入解释模式
+
+通常当最后一条用户消息包含这些意图时，会被识别为解释型追问：
+
+- “解释为什么当前候选更适合验证”
+- “帮我比较前两名候选”
+- “分析这一轮结果”
+- “为什么它比上一轮更好”
+
+如果没有可用的结果上下文，服务端会明确提示你先提供 `latest_result` / `reasoning_context`，或先调用一次设计。
+
+#### 环境变量说明
+
+Python Agent 侧的 LLM 配置现在支持两组变量，便于和 Go 代理保持一致：
+
+- `PROTEIN_AGENT_OPENAI_API_KEY` / `PROTEIN_AGENT_OPENAI_BASE_URL` / `PROTEIN_AGENT_LLM_MODEL`
+- `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`
+
+如果你已经给 Go 代理配置了 `OPENAI_*`，Python 侧的 reasoner 也会自动复用这组配置。
