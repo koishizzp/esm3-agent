@@ -298,7 +298,15 @@ class ESM3Client:
                 "output": {
                     "generate": {"sequences": ["AASEQ"]},
                     "mutate": {"sequences": ["AASEQ"]},
-                    "predict_structure": {"structure": {}, "confidence": 0.0},
+                    "predict_structure": {
+                        "structure": {},
+                        "confidence": 0.0,
+                        "mean_plddt": 0.0,
+                        "per_residue_plddt": [],
+                        "ptm": 0.0,
+                        "iptm": None,
+                        "pae": None,
+                    },
                     "inverse_fold": {"sequences": ["AASEQ"]},
                     "generate_with_function": {"sequences": ["AASEQ"], "function_annotations": []},
                 },

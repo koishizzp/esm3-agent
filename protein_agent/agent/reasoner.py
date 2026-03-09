@@ -97,12 +97,16 @@ class ResultReasoner:
         ranked = sorted(history, key=_score_value, reverse=True)
         top_records: list[dict[str, Any]] = []
         for item in ranked[:6]:
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
             top_records.append(
                 {
                     "score": item.get("score"),
                     "iteration": item.get("iteration"),
                     "mutation_history": item.get("mutation_history") or [],
                     "sequence": item.get("sequence") or "",
+                    "mean_plddt": metadata.get("mean_plddt"),
+                    "ptm": metadata.get("ptm"),
+                    "motif_intact": metadata.get("motif_intact"),
                 }
             )
         return {
@@ -138,6 +142,8 @@ class ResultReasoner:
                     "score": item.get("score"),
                     "iteration": item.get("round"),
                     "mutation_history": mutation_history,
+                    "metadata": item.get("metadata") or {},
+                    "structure_data": item.get("structure_data"),
                 }
             )
         best_mutation_history: list[str] = []
@@ -153,6 +159,8 @@ class ResultReasoner:
                 "score": best_candidate.get("score"),
                 "iteration": best_candidate.get("round"),
                 "mutation_history": best_mutation_history,
+                "metadata": best_candidate.get("metadata") or {},
+                "structure_data": best_candidate.get("structure_data"),
             },
             "generation_stats": latest_result.get("generation_stats") or [],
             "history": history,
@@ -218,6 +226,21 @@ class ResultReasoner:
             reasons.append(
                 f"它不是单纯的初始 seed，而是经历了 {len(mutation_history)} 步变异/筛选痕迹后留下来的候选，这通常比直接拿起始序列去做实验更有验证价值。"
             )
+
+        best_metadata = best.get("metadata") if isinstance(best.get("metadata"), dict) else {}
+        structure_bits: list[str] = []
+        mean_plddt = best_metadata.get("mean_plddt")
+        ptm = best_metadata.get("ptm")
+        motif_intact = best_metadata.get("motif_intact")
+        required_motif = best_metadata.get("required_motif") or "SYG"
+        if isinstance(mean_plddt, (int, float)):
+            structure_bits.append(f"mean pLDDT = {float(mean_plddt):.1f}")
+        if isinstance(ptm, (int, float)):
+            structure_bits.append(f"pTM = {float(ptm):.3f}")
+        if isinstance(motif_intact, bool):
+            structure_bits.append(f"{required_motif} 位点{'保留' if motif_intact else '被破坏'}")
+        if structure_bits:
+            reasons.append("按当前结构代理看，" + "，".join(structure_bits) + "。")
 
         constraint_bits: list[str] = []
         if input_context.get("input_sequence"):

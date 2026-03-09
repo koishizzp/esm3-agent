@@ -1231,6 +1231,47 @@
       return [...(records || [])].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, limit);
     }
 
+    function formatMetric(value, digits = 3) {
+      const num = Number(value);
+      return Number.isFinite(num) ? num.toFixed(digits) : '-';
+    }
+
+    function getRecordMetadata(record) {
+      const metadata = record?.metadata;
+      return metadata && typeof metadata === 'object' ? metadata : {};
+    }
+
+    function getBestRecord(best, records) {
+      if (!best) return null;
+      if (best.metadata || best.structure_data) return best;
+      return (records || []).find((record) => (
+        record?.sequence === best.sequence
+        && String(record?.iteration ?? '') === String(best.iteration ?? '')
+      )) || topRecords(records, 1)[0] || null;
+    }
+
+    function structureBits(record) {
+      const metadata = getRecordMetadata(record);
+      const bits = [];
+      if (Number.isFinite(Number(metadata.mean_plddt))) bits.push(`pLDDT ${formatMetric(metadata.mean_plddt, 1)}`);
+      if (Number.isFinite(Number(metadata.ptm))) bits.push(`pTM ${formatMetric(metadata.ptm, 3)}`);
+      if (typeof metadata.motif_intact === 'boolean') bits.push(`${metadata.required_motif || 'SYG'} ${metadata.motif_intact ? '保留' : '破坏'}`);
+      if (Number.isFinite(Number(metadata.structure_confidence))) bits.push(`conf ${formatMetric(metadata.structure_confidence, 3)}`);
+      return bits;
+    }
+
+    function penaltyBits(record) {
+      const metadata = getRecordMetadata(record);
+      const breakdown = metadata.score_breakdown && typeof metadata.score_breakdown === 'object' ? metadata.score_breakdown : {};
+      const bits = [];
+      if (Number(metadata.motif_penalty) > 0) bits.push(`motif penalty ${formatMetric(metadata.motif_penalty, 3)}`);
+      if (Number(metadata.length_penalty) > 0) bits.push(`length penalty ${formatMetric(metadata.length_penalty, 3)}`);
+      if (metadata.score_backend) bits.push(`${metadata.score_backend}${metadata.score_version ? ` · ${metadata.score_version}` : ''}`);
+      else if (metadata.score_version) bits.push(metadata.score_version);
+      if (Number.isFinite(Number(breakdown.structure_score))) bits.push(`structure score ${formatMetric(breakdown.structure_score, 4)}`);
+      return bits;
+    }
+
     function summarizeResult(result) {
       if (currentMode !== 'design') {
         const best = result?.best_sequences;
@@ -1247,6 +1288,7 @@
       }
       const best = result?.best_sequences;
       const records = result?.history || [];
+      const bestRecord = getBestRecord(best, records);
       const plan = result?.plan || {};
       const generationStats = result?.generation_stats || [];
       if (!best) return '这次任务已经执行，但我还没解析到可靠的最佳序列。建议先看右侧完整 JSON 排查返回结构。';
@@ -1254,11 +1296,15 @@
       const gap = ranked.length > 1 ? Number((ranked[0].score ?? 0) - (ranked[1].score ?? 0)).toFixed(4) : null;
       const firstGen = generationStats[0]?.best_score;
       const lastGen = generationStats[generationStats.length - 1]?.best_score;
+      const structureSummary = structureBits(bestRecord).join('，');
       return [
         `这一轮已经跑完，当前排在最前面的候选来自第 ${best.iteration ?? '-'} 轮，score = ${Number(best.score ?? 0).toFixed(4)}。`,
         gap !== null
           ? `它和当前第二名之间还有 ${gap} 的分数差，所以不是勉强领先。`
           : `当前可直接比较的候选不多，所以它先作为默认优先候选。`,
+        structureSummary
+          ? `按结构代理看，${structureSummary}。`
+          : `当前结果里还没有足够完整的结构分项，所以这里只能先按总分排序解释。`,
         generationStats.length > 1
           ? `从第 1 代到第 ${generationStats.length} 代，best score 由 ${Number(firstGen ?? 0).toFixed(4)} 提升到 ${Number(lastGen ?? 0).toFixed(4)}。`
           : `这次工作流是 ${plan.workflow || 'iterative_protein_optimization'}，目标是 ${plan.target || 'protein'}。`,
@@ -1377,6 +1423,8 @@
       jsonBox.textContent = JSON.stringify(result, null, 2);
       refreshContextSeq();
       renderDiff(previousBestSequence, latestBestSequence);
+      const bestRecord = getBestRecord(best, records);
+      const bestMetadata = getRecordMetadata(bestRecord || best);
       const modalities = [
         inputContext.input_sequence ? 'sequence' : null,
         inputContext.input_pdb_path || inputContext.input_pdb_text ? 'structure' : null,
@@ -1386,6 +1434,10 @@
       summaryBox.innerHTML = [
         ['任务类型', `${plan.workflow || '-'} · ${plan.target || '-'}`],
         ['最佳分数', Number(best.score ?? 0).toFixed(4)],
+        ['mean pLDDT', formatMetric(bestMetadata.mean_plddt, 1)],
+        ['pTM', formatMetric(bestMetadata.ptm, 3)],
+        ['色团位点', typeof bestMetadata.motif_intact === 'boolean' ? `${bestMetadata.required_motif || 'SYG'} ${bestMetadata.motif_intact ? '保留' : '破坏'}` : '-'],
+        ['评分版本', [bestMetadata.score_backend, bestMetadata.score_version].filter(Boolean).join(' · ') || '-'],
         ['最佳轮次', `${best.iteration ?? '-'}${maxIterationsLabel}`],
         ['候选记录', `${records.length} 条 · ${modalities}`],
       ].map(([label, value]) => `<div class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div></div>`).join('');
@@ -1396,7 +1448,9 @@
         const sequence = record.sequence || '-';
         const shortSeq = sequence.length > 76 ? `${sequence.slice(0, 76)}…` : sequence;
         const modeClass = (record.mutation_history || [currentMode])[0] || currentMode;
-        return `<div class="record-card ${modeClass}"><strong>#${idx + 1} · score ${Number(record.score ?? 0).toFixed(4)}</strong><div class="record-meta">iteration ${record.iteration ?? '-'} · mutation_history ${(record.mutation_history || []).join(', ') || 'seed'}</div><div class="record-seq">${shortSeq}</div></div>`;
+        const structureSummary = structureBits(record);
+        const penalties = penaltyBits(record);
+        return `<div class="record-card ${modeClass}"><strong>#${idx + 1} · score ${Number(record.score ?? 0).toFixed(4)}</strong><div class="record-meta">iteration ${record.iteration ?? '-'} · mutation_history ${(record.mutation_history || []).join(', ') || 'seed'}</div>${structureSummary.length ? `<div class="record-meta">${structureSummary.join(' · ')}</div>` : ''}${penalties.length ? `<div class="record-meta">${penalties.join(' · ')}</div>` : ''}<div class="record-seq">${shortSeq}</div></div>`;
       }).join('') : '<div class="empty-state">当前结果没有候选历史可显示。</div>';
 
       if (generationStats.length) {

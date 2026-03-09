@@ -15,6 +15,26 @@ class ExperimentLoopEngine:
         self.executor = executor
         self.memory = memory
 
+    def _build_scoring_context(self, plan: dict[str, Any], task: str) -> dict[str, Any]:
+        target = str(plan.get("target") or "").strip()
+        workflow = str(plan.get("workflow") or "").strip()
+        task_text = str(task or "").strip()
+        use_gfp_constraints = "gfp" in " ".join([target, workflow, task_text]).lower()
+        return {
+            "task": task_text,
+            "target": target,
+            "workflow": workflow,
+            "use_gfp_constraints": use_gfp_constraints,
+        }
+
+    def _selection_pool(self, records: list[ExperimentRecord]) -> list[ExperimentRecord]:
+        valid_records = [
+            record
+            for record in records
+            if (record.metadata or {}).get("valid_candidate", True) is not False
+        ]
+        return valid_records or records
+
     def run(
         self,
         plan: dict[str, Any],
@@ -36,6 +56,7 @@ class ExperimentLoopEngine:
         best_score = float("-inf")
         context = multimodal_context or {}
         generation_stats: list[dict[str, Any]] = []
+        scoring_context = self._build_scoring_context(plan, task)
 
         population = self._initialize_population(
             initial_sequences=initial_sequences,
@@ -48,19 +69,25 @@ class ExperimentLoopEngine:
             evaluated = []
             for candidate in population:
                 seq = candidate["sequence"]
-                result = self.executor.evaluate(seq)
+                result = self.executor.evaluate(seq, scoring_context=scoring_context)
                 record = ExperimentRecord(
                     sequence=seq,
                     mutation_history=list(candidate.get("mutation_history") or []),
                     score=result["score"],
                     iteration=iteration,
                     structure_data=result["structure"],
-                    metadata={**result.get("metrics", {}), **context},
+                    metadata={
+                        **result.get("metrics", {}),
+                        "score_breakdown": result.get("score_breakdown", {}),
+                        "valid_candidate": result.get("valid_candidate", True),
+                        **context,
+                    },
                 )
                 self.memory.add(record)
                 evaluated.append(record)
 
-            ranked = sorted(evaluated, key=lambda r: r.score, reverse=True)
+            selection_pool = self._selection_pool(evaluated)
+            ranked = sorted(selection_pool, key=lambda r: r.score, reverse=True)
             top = ranked[:elite_size]
             generation_stats.append(
                 self._generation_summary(
@@ -70,6 +97,8 @@ class ExperimentLoopEngine:
                     elite_size=elite_size,
                     parent_pool_size=parent_pool_size,
                     mutations_per_parent=mutations_per_parent,
+                    valid_candidates=len(selection_pool),
+                    invalid_candidates=max(0, len(evaluated) - len(selection_pool)),
                 )
             )
             current_best = top[0].score
@@ -140,6 +169,8 @@ class ExperimentLoopEngine:
         elite_size: int,
         parent_pool_size: int,
         mutations_per_parent: int,
+        valid_candidates: int,
+        invalid_candidates: int,
     ) -> dict[str, Any]:
         scores = [record.score for record in ranked]
         average_score = sum(scores) / len(scores) if scores else 0.0
@@ -155,6 +186,8 @@ class ExperimentLoopEngine:
             "average_score": average_score,
             "worst_score": worst.score if worst else 0.0,
             "best_sequence": best.sequence if best else None,
+            "valid_candidates": valid_candidates,
+            "invalid_candidates": invalid_candidates,
         }
 
     def _next_generation(
@@ -172,12 +205,13 @@ class ExperimentLoopEngine:
         next_population: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        def add_candidate(sequence: str, mutation_history: list[str]) -> None:
+        def add_candidate(sequence: str, mutation_history: list[str]) -> bool:
             value = (sequence or "").strip().upper()
             if not value or value in seen or len(next_population) >= population_size:
-                return
+                return False
             seen.add(value)
             next_population.append({"sequence": value, "mutation_history": mutation_history})
+            return True
 
         elites = ranked[:elite_size]
         parents = ranked[:parent_pool_size]
@@ -197,8 +231,13 @@ class ExperimentLoopEngine:
                     num_candidates=offspring_count,
                 )
                 for sequence in mutated:
-                    add_candidate(sequence, list(parent.mutation_history) + [f"mutate_from_iter_{parent.iteration}"])
-                    progressed = True
+                    progressed = (
+                        add_candidate(
+                            sequence,
+                            list(parent.mutation_history) + [f"mutate_from_iter_{parent.iteration}"],
+                        )
+                        or progressed
+                    )
                     if len(next_population) >= population_size:
                         break
                 if len(next_population) >= population_size:
@@ -208,8 +247,10 @@ class ExperimentLoopEngine:
             if not progressed:
                 generated = self.executor.generate(seed_prompt, population_size - len(next_population))
                 for sequence in generated:
-                    add_candidate(sequence, ["regenerate_population"])
+                    progressed = add_candidate(sequence, ["regenerate_population"]) or progressed
                 if not generated:
+                    break
+                if not progressed:
                     break
 
         return next_population[:population_size]

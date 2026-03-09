@@ -27,33 +27,36 @@ class ExperimentMemory:
     def all_records(self) -> list[ExperimentRecord]:
         return list(self._records)
 
+    def _eligible_records(self) -> list[ExperimentRecord]:
+        valid_records = [
+            record
+            for record in self._records
+            if (record.metadata or {}).get("valid_candidate", True) is not False
+        ]
+        return valid_records or list(self._records)
+
     def top_k(self, k: int = 5) -> list[ExperimentRecord]:
-        return sorted(self._records, key=lambda r: r.score, reverse=True)[:k]
+        return sorted(self._eligible_records(), key=lambda r: r.score, reverse=True)[:k]
 
     def best(self) -> ExperimentRecord | None:
-        if not self._records:
+        eligible = self._eligible_records()
+        if not eligible:
             return None
-        return max(self._records, key=lambda r: r.score)
+        return max(eligible, key=lambda r: r.score)
+
+    def _serialize_record(self, record: ExperimentRecord) -> dict[str, Any]:
+        return {
+            "sequence": record.sequence,
+            "mutation_history": record.mutation_history,
+            "score": record.score,
+            "iteration": record.iteration,
+            "structure_data": record.structure_data,
+            "metadata": record.metadata,
+        }
 
     def to_dict(self) -> dict[str, Any]:
+        best_record = self.best()
         return {
-            "records": [
-                {
-                    "sequence": r.sequence,
-                    "mutation_history": r.mutation_history,
-                    "score": r.score,
-                    "iteration": r.iteration,
-                    "structure_data": r.structure_data,
-                    "metadata": r.metadata,
-                }
-                for r in self._records
-            ],
-            "best": None
-            if self.best() is None
-            else {
-                "sequence": self.best().sequence,
-                "score": self.best().score,
-                "mutation_history": self.best().mutation_history,
-                "iteration": self.best().iteration,
-            },
+            "records": [self._serialize_record(record) for record in self._records],
+            "best": None if best_record is None else self._serialize_record(best_record),
         }

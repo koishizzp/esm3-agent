@@ -288,14 +288,28 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
                 multimodal_context=multimodal_context,
             )
 
+        best_record = result.get("best") if isinstance(result, dict) else None
+        best_metadata = best_record.get("metadata", {}) if isinstance(best_record, dict) else {}
+
         return {
             "task": req.task,
             "input_context": multimodal_context,
             "plan": plan,
             "history": result["records"],
             "best_sequences": result["best"],
+            "best_candidate": result["best"],
             "generation_stats": result.get("generation_stats", []),
             "evolution_config": result.get("evolution_config", plan.get("evolution", {})),
+            "scoring": {
+                "backend": settings.scoring_backend,
+                "score_version": best_metadata.get("score_version"),
+                "require_gfp_chromophore": settings.require_gfp_chromophore,
+                "gfp_reference_length": settings.gfp_reference_length,
+                "gfp_chromophore_start": settings.gfp_chromophore_start,
+                "gfp_chromophore_motif": settings.gfp_chromophore_motif,
+                "use_rosetta": settings.use_rosetta,
+                "rosetta_topn": settings.rosetta_topn,
+            },
         }
     except Exception as exc:
         LOGGER.exception("Protein design execution failed")

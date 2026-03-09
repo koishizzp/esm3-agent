@@ -108,6 +108,13 @@ class Settings:
     max_iterations: int = 100
 
     use_gpu: bool = True
+    scoring_backend: str = "structure"
+    require_gfp_chromophore: bool = True
+    gfp_reference_length: int = 238
+    gfp_chromophore_start: int = 65
+    gfp_chromophore_motif: str = "SYG"
+    use_rosetta: bool = False
+    rosetta_topn: int = 5
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -161,6 +168,23 @@ class Settings:
             ),
             max_iterations=max_iterations,
             use_gpu=_to_bool(_env_get(data, "PROTEIN_AGENT_USE_GPU"), defaults.use_gpu),
+            scoring_backend=_env_get(data, "PROTEIN_AGENT_SCORING_BACKEND", defaults.scoring_backend)
+            or defaults.scoring_backend,
+            require_gfp_chromophore=_to_bool(
+                _env_get(data, "PROTEIN_AGENT_REQUIRE_GFP_CHROMOPHORE"), defaults.require_gfp_chromophore
+            ),
+            gfp_reference_length=_to_int(
+                _env_get(data, "PROTEIN_AGENT_GFP_REFERENCE_LENGTH"), defaults.gfp_reference_length
+            ),
+            gfp_chromophore_start=_to_int(
+                _env_get(data, "PROTEIN_AGENT_GFP_CHROMOPHORE_START"), defaults.gfp_chromophore_start
+            ),
+            gfp_chromophore_motif=_env_get(
+                data, "PROTEIN_AGENT_GFP_CHROMOPHORE_MOTIF", defaults.gfp_chromophore_motif
+            )
+            or defaults.gfp_chromophore_motif,
+            use_rosetta=_to_bool(_env_get(data, "PROTEIN_AGENT_USE_ROSETTA"), defaults.use_rosetta),
+            rosetta_topn=_to_int(_env_get(data, "PROTEIN_AGENT_ROSETTA_TOPN"), defaults.rosetta_topn),
         )
 
 

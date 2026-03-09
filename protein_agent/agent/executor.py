@@ -21,7 +21,7 @@ class ToolExecutor:
         self.structure_tool = ESM3StructureTool(self.esm3_client)
         self.inverse_fold_tool = ESM3InverseFoldTool(self.esm3_client)
         self.function_generate_tool = ESM3FunctionGenerateTool(self.esm3_client)
-        self.score_tool = ProteinScoreTool()
+        self.score_tool = ProteinScoreTool(settings)
 
     def generate(self, prompt: str, num_candidates: int) -> list[str]:
         out = self.generate_tool.execute({"prompt": prompt, "num_candidates": num_candidates})
@@ -37,9 +37,12 @@ class ToolExecutor:
         )
         return out["sequences"]
 
-    def evaluate(self, sequence: str) -> dict[str, Any]:
+    def evaluate(self, sequence: str, scoring_context: dict[str, Any] | None = None) -> dict[str, Any]:
         structure = self.structure_tool.execute({"sequence": sequence})
-        score = self.score_tool.execute({"sequence": sequence, "structure": structure})
+        payload = {"sequence": sequence, "structure": structure}
+        if scoring_context:
+            payload["scoring_context"] = scoring_context
+        score = self.score_tool.execute(payload)
         return {"structure": structure, **score}
 
     def inverse_fold(

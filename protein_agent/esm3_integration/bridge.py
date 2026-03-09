@@ -110,14 +110,83 @@ def serialize_structure(value: Any) -> Any:
     return str(value)
 
 
+def _extract_value(source: Any, *names: str) -> Any:
+    for name in names:
+        if isinstance(source, dict) and name in source:
+            return source[name]
+        value = getattr(source, name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _float_list(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    if hasattr(value, "detach"):
+        try:
+            value = value.detach().cpu().tolist()
+        except Exception:  # noqa: BLE001
+            return None
+    elif hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
+        try:
+            value = value.tolist()
+        except Exception:  # noqa: BLE001
+            return None
+
+    if not isinstance(value, (list, tuple)):
+        return None
+
+    out: list[float] = []
+
+    def collect(item: Any) -> None:
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                collect(child)
+            return
+        number = to_float(item, None)
+        if number is not None:
+            out.append(number)
+
+    collect(value)
+    return out or None
+
+
 def normalize_structure(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, dict):
-        structure = raw.get("structure", raw)
-        confidence = to_float(first_non_none(raw.get("confidence"), raw.get("plddt")), 0.0)
-        return {"structure": serialize_structure(structure), "confidence": confidence}
-    structure = getattr(raw, "structure", None)
-    confidence = to_float(first_non_none(getattr(raw, "confidence", None), getattr(raw, "plddt", None)), 0.0)
-    return {"structure": serialize_structure(structure), "confidence": confidence}
+    structure = _extract_value(raw, "structure", "coordinates")
+    per_residue_plddt = _float_list(_extract_value(raw, "per_residue_plddt", "plddt", "plddts"))
+    if per_residue_plddt and max(per_residue_plddt) <= 1.0:
+        per_residue_plddt = [value * 100.0 for value in per_residue_plddt]
+    mean_plddt = to_float(_extract_value(raw, "mean_plddt"), None)
+    scalar_plddt = to_float(_extract_value(raw, "plddt"), None)
+    if mean_plddt is None and scalar_plddt is not None:
+        mean_plddt = scalar_plddt if scalar_plddt > 1.0 else scalar_plddt * 100.0
+    elif mean_plddt is not None and mean_plddt <= 1.0:
+        mean_plddt *= 100.0
+    if mean_plddt is None and per_residue_plddt:
+        mean_plddt = sum(per_residue_plddt) / len(per_residue_plddt)
+
+    ptm = to_float(_extract_value(raw, "ptm"), None)
+    iptm = to_float(_extract_value(raw, "iptm", "iptm_score"), None)
+    confidence = to_float(_extract_value(raw, "confidence"), None)
+    if confidence is None:
+        if mean_plddt is not None:
+            confidence = max(0.0, min(1.0, mean_plddt / 100.0))
+        elif ptm is not None:
+            confidence = max(0.0, min(1.0, ptm))
+
+    pae = _extract_value(raw, "pae", "predicted_aligned_error")
+    backend = _extract_value(raw, "backend", "entrypoint_used", "model_name")
+    return {
+        "structure": serialize_structure(structure),
+        "confidence": confidence,
+        "mean_plddt": mean_plddt,
+        "per_residue_plddt": per_residue_plddt or [],
+        "ptm": ptm,
+        "iptm": iptm,
+        "pae": serialize_structure(pae),
+        "backend": backend,
+    }
 
 
 def build_values(payload: dict[str, Any]) -> dict[str, Any]:
@@ -724,12 +793,7 @@ def sdk_predict_structure(model: Any, sequence: str, num_steps: int) -> dict[str
     protein = ESMProtein(sequence=sequence)
     config = GenerationConfig(track="structure", num_steps=max(1, num_steps))
     result = model.generate(protein, config)
-    structure = first_non_none(getattr(result, "coordinates", None), getattr(result, "structure", None))
-    confidence = first_non_none(getattr(result, "ptm", None), getattr(result, "confidence", None))
-    return {
-        "structure": serialize_structure(structure),
-        "confidence": to_float(confidence, 0.0),
-    }
+    return normalize_structure(result)
 
 
 def generate_with_model(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
