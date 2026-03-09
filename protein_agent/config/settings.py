@@ -113,6 +113,11 @@ class Settings:
     gfp_reference_length: int = 238
     gfp_chromophore_start: int = 65
     gfp_chromophore_motif: str = "SYG"
+    surrogate_model_path: str | None = None
+    surrogate_model_type: str = "xgboost"
+    surrogate_use_structure_features: bool = False
+    surrogate_ensemble_size: int = 5
+    surrogate_feature_backend: str = "mutation"
     use_rosetta: bool = False
     rosetta_topn: int = 5
 
@@ -183,6 +188,28 @@ class Settings:
                 data, "PROTEIN_AGENT_GFP_CHROMOPHORE_MOTIF", defaults.gfp_chromophore_motif
             )
             or defaults.gfp_chromophore_motif,
+            surrogate_model_path=_to_optional_str(_env_get(data, "PROTEIN_AGENT_SURROGATE_MODEL_PATH")),
+            surrogate_model_type=_env_get(
+                data, "PROTEIN_AGENT_SURROGATE_MODEL_TYPE", defaults.surrogate_model_type
+            )
+            or defaults.surrogate_model_type,
+            surrogate_use_structure_features=_to_bool(
+                _env_get(
+                    data,
+                    "PROTEIN_AGENT_SURROGATE_USE_STRUCTURE_FEATURES",
+                ),
+                defaults.surrogate_use_structure_features,
+            ),
+            surrogate_ensemble_size=_to_int(
+                _env_get(data, "PROTEIN_AGENT_SURROGATE_ENSEMBLE_SIZE"),
+                defaults.surrogate_ensemble_size,
+            ),
+            surrogate_feature_backend=_env_get(
+                data,
+                "PROTEIN_AGENT_SURROGATE_FEATURE_BACKEND",
+                defaults.surrogate_feature_backend,
+            )
+            or defaults.surrogate_feature_backend,
             use_rosetta=_to_bool(_env_get(data, "PROTEIN_AGENT_USE_ROSETTA"), defaults.use_rosetta),
             rosetta_topn=_to_int(_env_get(data, "PROTEIN_AGENT_ROSETTA_TOPN"), defaults.rosetta_topn),
         )

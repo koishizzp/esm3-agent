@@ -3,13 +3,8 @@ from __future__ import annotations
 
 from protein_agent.agent.executor import ToolExecutor
 from protein_agent.agent.workflow import ExperimentLoopEngine
+from protein_agent.gfp import GFP_SCAFFOLD
 from protein_agent.memory.experiment_memory import ExperimentMemory
-
-
-GFP_SCAFFOLD = (
-    "MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLV"
-    "TTLSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
-)
 
 
 class GFPOptimizer:

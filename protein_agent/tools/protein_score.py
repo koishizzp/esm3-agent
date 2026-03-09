@@ -242,7 +242,7 @@ class ProteinScoreTool(Tool):
             valid_candidate = not scoring_profile["require_gfp_chromophore"] or bool(motif_intact)
 
         score = structure_score - motif_penalty - length_penalty
-        score_backend = f"{self.settings.scoring_backend}:{'gfp' if use_gfp_constraints else 'generic'}_structure_proxy"
+        score_backend = f"structure:{'gfp' if use_gfp_constraints else 'generic'}_structure_proxy"
 
         score_breakdown = {
             "plddt_norm": round(plddt_norm, 6),
