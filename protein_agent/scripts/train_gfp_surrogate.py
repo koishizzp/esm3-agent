@@ -3,6 +3,12 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import numpy as np
 
@@ -41,8 +47,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    embedding_cache = None
+    if args.embedding_cache:
+        embedding_cache = Path(args.embedding_cache).resolve()
+        if not embedding_cache.exists():
+            raise FileNotFoundError(f"Embedding cache does not exist: {embedding_cache}")
+    if args.feature_backend == "hybrid" and embedding_cache is None:
+        raise ValueError("feature-backend hybrid requires --embedding-cache")
+
     df = read_table(args.input)
     train_df, valid_df, test_df = split_dataset(df, args.split_column)
+    if train_df.empty or valid_df.empty or test_df.empty:
+        raise ValueError(
+            f"Split {args.split_column} produced empty partitions: "
+            f"train={len(train_df)}, valid={len(valid_df)}, test={len(test_df)}"
+        )
     reference_sequence = load_reference_sequence(args.reference_fasta)
     feature_config = FeatureConfig(
         reference_sequence=reference_sequence,
@@ -50,7 +69,7 @@ def main() -> None:
         chromophore_motif=args.chromophore_motif,
         feature_backend=args.feature_backend,
         include_structure_features=args.use_structure_features,
-        embedding_cache_path=args.embedding_cache,
+        embedding_cache_path=str(embedding_cache) if embedding_cache is not None else None,
     )
     extractor = SequenceFeatureExtractor(feature_config)
 

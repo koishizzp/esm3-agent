@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -25,9 +26,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_command(command: list[str]) -> None:
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_env_file(path: Path | None) -> dict[str, str]:
+    if path is None or not path.exists():
+        return {}
+    env: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key.strip()] = value.strip().strip('"').strip("'")
+    return env
+
+
+def _subprocess_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    existing = env.get("PYTHONPATH", "").strip()
+    repo_root_text = str(REPO_ROOT)
+    env["PYTHONPATH"] = os.pathsep.join(part for part in [repo_root_text, existing] if part)
+    return env
+
+
+def run_command(command: list[str], extra_env: dict[str, str] | None = None) -> None:
     print("$ " + " ".join(command))
-    subprocess.run(command, check=True)
+    subprocess.run(command, check=True, env=_subprocess_env(extra_env))
 
 
 def update_env_file(env_path: Path, updates: dict[str, str]) -> None:
@@ -57,6 +84,7 @@ def update_env_file(env_path: Path, updates: dict[str, str]) -> None:
 
 def main() -> None:
     args = build_parser().parse_args()
+    runtime_env = _load_env_file(Path(args.env_file)) if args.env_file else {}
     workspace_dir = Path(args.workspace_dir)
     processed_dir = workspace_dir / "data" / "gfp" / "processed"
     embedding_dir = workspace_dir / "data" / "gfp" / "embeddings" / "esm3_mean_v1"
@@ -74,33 +102,34 @@ def main() -> None:
             args.reference_fasta,
             "--output-dir",
             str(processed_dir),
-        ]
+        ],
+        extra_env=runtime_env,
     )
     cleaned_dataset = processed_dir / "cleaned.parquet"
     if not cleaned_dataset.exists():
         cleaned_dataset = processed_dir / "cleaned.csv"
-    run_command(
-        [
-            python,
-            str(Path(__file__).with_name("extract_gfp_embeddings.py")),
-            "--input",
-            str(cleaned_dataset),
-            "--output-dir",
-            str(embedding_dir),
-            "--embedding-script",
-            args.embedding_script,
-            "--python",
-            args.esm_python,
-            "--device",
-            args.device,
-            "--pooling",
-            args.pooling,
-            "--format",
-            "both",
-        ]
-        + (["--half"] if args.half else [])
-        + (["--l2-normalize"] if args.l2_normalize else [])
-    )
+    extract_command = [
+        python,
+        str(Path(__file__).with_name("extract_gfp_embeddings.py")),
+        "--input",
+        str(cleaned_dataset),
+        "--output-dir",
+        str(embedding_dir),
+        "--embedding-script",
+        args.embedding_script,
+        "--python",
+        args.esm_python,
+        "--device",
+        args.device,
+        "--pooling",
+        args.pooling,
+        "--format",
+        "both",
+    ]
+    if args.env_file:
+        extract_command.extend(["--env-file", args.env_file])
+    extract_command += (["--half"] if args.half else []) + (["--l2-normalize"] if args.l2_normalize else [])
+    run_command(extract_command, extra_env=runtime_env)
     run_command(
         [
             python,
@@ -121,7 +150,8 @@ def main() -> None:
             "hybrid",
             "--embedding-cache",
             str(embedding_cache),
-        ]
+        ],
+        extra_env=runtime_env,
     )
 
     if args.env_file:

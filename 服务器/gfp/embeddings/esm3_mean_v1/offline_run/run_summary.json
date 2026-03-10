@@ -1,0 +1,18 @@
+{
+  "input_file": "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction/esm3-agent/data/gfp/embeddings/esm3_mean_v1/sequences.fasta",
+  "output_dir": "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction/esm3-agent/data/gfp/embeddings/esm3_mean_v1/offline_run",
+  "snapshot": "/mnt/disk3/tio_nekton4/esm3/weights",
+  "device": "cuda",
+  "half_precision": false,
+  "pooling": "mean",
+  "l2_normalize": false,
+  "max_seq_length": 4096,
+  "total_seen": 70,
+  "processed": 70,
+  "skipped_long": 0,
+  "skipped_invalid": 0,
+  "failed": 0,
+  "elapsed_seconds": 6.834582090377808,
+  "throughput_seq_per_sec": 10.242030759795949,
+  "timestamp": 1773124953
+}

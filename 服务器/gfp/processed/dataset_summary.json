@@ -1,0 +1,20 @@
+{
+  "config": {
+    "reference_name": "avGFP",
+    "chromophore_start": 65,
+    "chromophore_motif": "SYG",
+    "train_max_mutations": 3,
+    "valid_max_mutations": 4
+  },
+  "summary": {
+    "num_rows": 70,
+    "num_unique_sequences": 70,
+    "brightness_min": 1.30102982871,
+    "brightness_max": 3.94930601797,
+    "brightness_mean": 3.1667482922355714,
+    "mutation_count_min": 0,
+    "mutation_count_max": 2,
+    "motif_intact_fraction": 0.0
+  },
+  "output_path": "/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction/esm3-agent/data/gfp/processed/cleaned.parquet"
+}

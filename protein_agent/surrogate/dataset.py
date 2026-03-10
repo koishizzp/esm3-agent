@@ -14,6 +14,7 @@ import pandas as pd
 from protein_agent.gfp import GFP_SCAFFOLD
 
 AA_ALPHABET = set("ACDEFGHIKLMNPQRSTVWY")
+NUCLEOTIDE_ALPHABET = set("ACGTUN")
 
 
 @dataclass(slots=True)
@@ -31,13 +32,38 @@ def load_reference_sequence(
     fasta_path: str | Path | None = None,
     fallback: str | None = None,
 ) -> str:
+    def normalize_reference(sequence: str, source: str) -> str:
+        cleaned = sequence.strip().upper()
+        if not cleaned:
+            raise ValueError(f"Reference sequence is empty: {source}")
+
+        residues = set(cleaned)
+        invalid = sorted(residues - AA_ALPHABET)
+        if invalid:
+            preview = ", ".join(invalid[:8])
+            raise ValueError(
+                f"Reference sequence contains non-amino-acid residues from {source}: {preview}"
+            )
+
+        # The Sarkisyan GFP table uses amino-acid mutations; a coding DNA FASTA
+        # will silently produce nonsense sequences unless we reject it here.
+        if len(cleaned) >= 100 and residues.issubset(NUCLEOTIDE_ALPHABET):
+            raise ValueError(
+                "Reference sequence appears to be nucleotide, but GFP surrogate preparation expects "
+                f"an amino-acid sequence. Source: {source}. Prefix: {cleaned[:18]}"
+            )
+
+        return cleaned
+
     if fasta_path is None:
-        return (fallback or GFP_SCAFFOLD).strip().upper()
+        return normalize_reference(fallback or GFP_SCAFFOLD, "built-in GFP scaffold")
 
     text = Path(fasta_path).read_text(encoding="utf-8")
     parts = [line.strip() for line in text.splitlines() if line.strip() and not line.startswith(">")]
-    sequence = "".join(parts).strip().upper()
-    return sequence or (fallback or GFP_SCAFFOLD).strip().upper()
+    sequence = "".join(parts)
+    if sequence.strip():
+        return normalize_reference(sequence, str(fasta_path))
+    return normalize_reference(fallback or GFP_SCAFFOLD, f"fallback for {fasta_path}")
 
 
 def read_table(path: str | Path) -> pd.DataFrame:

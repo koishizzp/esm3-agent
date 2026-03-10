@@ -2,7 +2,6 @@
 
 from .features import FeatureConfig, SequenceFeatureExtractor
 from .models import load_ensemble_bundle, save_ensemble_bundle, train_ensemble
-from .predictor import GFPFluorescencePredictor
 
 __all__ = [
     "FeatureConfig",
@@ -12,3 +11,11 @@ __all__ = [
     "save_ensemble_bundle",
     "train_ensemble",
 ]
+
+
+def __getattr__(name: str):
+    if name == "GFPFluorescencePredictor":
+        from .predictor import GFPFluorescencePredictor
+
+        return GFPFluorescencePredictor
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
