@@ -251,7 +251,12 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
             "structure": bool(req.pdb_path or (req.pdb_text and req.pdb_text.strip())),
             "function": bool(req.function_keywords or req.function_annotations),
         }
+        max_iterations = req.max_iterations or plan.get("max_iterations", settings.max_iterations)
         candidates_per_round = req.candidates_per_round or plan.get("candidates_per_round", settings.default_candidates)
+        patience = req.patience or plan.get("patience", settings.default_patience)
+        plan["max_iterations"] = max_iterations
+        plan["candidates_per_round"] = candidates_per_round
+        plan["patience"] = patience
         plan["evolution"] = {
             "population_size": req.population_size or max(candidates_per_round * 2, 8),
             "elite_size": req.elite_size or 2,
@@ -266,9 +271,9 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
             workflow = GFPOptimizer(executor)
             result = workflow.run(
                 task=enriched_task,
-                max_iterations=req.max_iterations or plan.get("max_iterations", settings.max_iterations),
+                max_iterations=max_iterations,
                 candidates_per_round=candidates_per_round,
-                patience=req.patience or plan.get("patience", settings.default_patience),
+                patience=patience,
                 seed_prompt=seed_prompt,
                 initial_sequences=initial_sequences,
                 multimodal_context=multimodal_context,
@@ -277,9 +282,6 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
         else:
             memory = ExperimentMemory()
             loop_engine = ExperimentLoopEngine(executor, memory)
-            plan["max_iterations"] = req.max_iterations or plan.get("max_iterations", settings.max_iterations)
-            plan["candidates_per_round"] = candidates_per_round
-            plan["patience"] = req.patience or plan.get("patience", settings.default_patience)
             result = loop_engine.run(
                 plan=plan,
                 task=enriched_task,
