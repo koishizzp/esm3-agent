@@ -26,5 +26,5 @@ features:
 llm:
   provider: openai
   base_url: https://ai.xingyungept.cn/v1
-  api_key: ""
+  api_key: "sk-3yCBbn8CdJ8HmhqzHcCgtSfroxr1OnzTeRQ7iW60vOE7kAwi"
   model: gpt-5.2
