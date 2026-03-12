@@ -164,11 +164,13 @@ class DesignAPITests(unittest.TestCase):
         self.assertEqual(result["scoring"]["surrogate_model_path"], "/models/gfp_surrogate/xgb_ensemble_v1_randomsplit")
         self.assertEqual(result["scoring"]["gfp_reference_length"], 236)
         self.assertEqual(result["scoring"]["gfp_chromophore_start"], 63)
+        self.assertEqual(result["scoring"]["gfp_chromophore_source"], "input_sequence")
         self.assertEqual(result["best_candidate"]["metadata"]["score_mode"], "hybrid")
         self.assertTrue(result["best_candidate"]["metadata"]["surrogate_available"])
         self.assertEqual(result["best_candidate"]["metadata"]["model_version"], "xgb_ensemble_v1_randomsplit")
         self.assertEqual(result["run_artifact_path"], "/tmp/runs/gfp.json")
         self.assertEqual(result["input_context"]["sequence_constraints"]["reference_length"], 236)
+        self.assertEqual(result["input_context"]["gfp_constraint_profile"]["gfp_chromophore_start"], 63)
         self.assertEqual(
             result["input_context"]["sequence_constraints"]["fixed_residues"],
             [
@@ -212,6 +214,45 @@ class DesignAPITests(unittest.TestCase):
         self.assertTrue(result["input_context"]["detected_inline_sequence"])
         self.assertEqual(result["input_context"]["sequence_constraints"]["reference_length"], len(inline_sequence))
         self.assertEqual(result["best_candidate"]["sequence"], inline_sequence)
+
+    def test_manual_fixed_residue_motif_overrides_default_gfp_chromophore_start(self) -> None:
+        settings = Settings(
+            scoring_backend="hybrid",
+            require_gfp_chromophore=True,
+            gfp_reference_length=236,
+            gfp_chromophore_start=63,
+            gfp_chromophore_motif="SYG",
+        )
+        seq_238 = (
+            "MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
+        )
+        req = DesignRequest(
+            task="Design an improved GFP and iteratively optimize it",
+            sequence=seq_238,
+            max_iterations=1,
+            candidates_per_round=2,
+            patience=1,
+            fixed_residues=[
+                {"position": 65, "residue": "S"},
+                {"position": 66, "residue": "Y"},
+                {"position": 67, "residue": "G"},
+            ],
+        )
+
+        with (
+            patch("protein_agent.api.main.get_settings", return_value=settings),
+            patch("protein_agent.api.main.LLMPlanner", DummyPlanner),
+            patch("protein_agent.api.main.ToolExecutor", DummyExecutor),
+            patch("protein_agent.api.main.build_initial_sequences", return_value=[]),
+            patch("protein_agent.api.main.GFPOptimizer", DummyGFPOptimizer),
+            patch("protein_agent.api.main.timestamped_run_path", return_value="/tmp/runs/gfp_238.json"),
+        ):
+            result = design_protein(req)
+
+        self.assertEqual(result["input_context"]["gfp_constraint_profile"]["gfp_chromophore_start"], 65)
+        self.assertEqual(result["input_context"]["gfp_constraint_profile"]["gfp_chromophore_source"], "fixed_residues")
+        self.assertEqual(result["input_context"]["sequence_constraints"]["gfp_chromophore_start"], 65)
+        self.assertEqual(result["scoring"]["gfp_chromophore_start"], 65)
 
 
 if __name__ == "__main__":

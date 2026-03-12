@@ -118,6 +118,71 @@ def _strip_inline_sequence(task: str, sequence: str | None) -> str:
     return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 
+def _find_motif_starts(sequence: str | None, motif: str) -> list[int]:
+    seq = _normalize_amino_acid_sequence(sequence)
+    normalized_motif = _normalize_amino_acid_sequence(motif)
+    if not seq or not normalized_motif:
+        return []
+    starts: list[int] = []
+    width = len(normalized_motif)
+    for index in range(0, len(seq) - width + 1):
+        if seq[index : index + width] == normalized_motif:
+            starts.append(index + 1)
+    return starts
+
+
+def _find_fixed_residue_motif_start(fixed_residues: list[dict[str, Any]], motif: str) -> int | None:
+    normalized_motif = _normalize_amino_acid_sequence(motif)
+    if not normalized_motif:
+        return None
+    position_map = {
+        int(item.get("position") or 0): str(item.get("residue") or "").strip().upper()
+        for item in fixed_residues
+        if isinstance(item, dict)
+    }
+    starts: list[int] = []
+    width = len(normalized_motif)
+    for position in sorted(position_map):
+        if all(position_map.get(position + offset) == normalized_motif[offset] for offset in range(width)):
+            starts.append(position)
+    if not starts:
+        return None
+    return starts[0]
+
+
+def resolve_gfp_constraint_profile(
+    req: DesignRequest,
+    settings: Any,
+    *,
+    resolved_sequence: str | None = None,
+    requested_fixed_residues: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    use_gfp_constraints = "gfp" in req.task.lower()
+    motif = str(settings.gfp_chromophore_motif or "SYG").strip().upper() or "SYG"
+    chromophore_start = int(settings.gfp_chromophore_start)
+    chromophore_source = "settings_default"
+    requested_items = requested_fixed_residues or []
+
+    fixed_start = _find_fixed_residue_motif_start(requested_items, motif)
+    if fixed_start is not None:
+        chromophore_start = fixed_start
+        chromophore_source = "fixed_residues"
+    else:
+        sequence_starts = _find_motif_starts(resolved_sequence, motif)
+        if len(sequence_starts) == 1:
+            chromophore_start = sequence_starts[0]
+            chromophore_source = "input_sequence"
+
+    return {
+        "use_gfp_constraints": use_gfp_constraints,
+        "require_gfp_chromophore": settings.require_gfp_chromophore,
+        "gfp_reference_length": len(resolved_sequence) if resolved_sequence else int(settings.gfp_reference_length),
+        "gfp_chromophore_start": chromophore_start,
+        "gfp_chromophore_motif": motif,
+        "gfp_chromophore_source": chromophore_source,
+    }
+
+
 def resolve_input_sequence(req: DesignRequest) -> tuple[str | None, str | None, str]:
     explicit = _normalize_amino_acid_sequence(req.sequence)
     if explicit:
@@ -135,6 +200,7 @@ def build_multimodal_context(
     *,
     resolved_sequence: str | None = None,
     sequence_source: str | None = None,
+    gfp_constraint_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     annotations = [item.model_dump() for item in (req.function_annotations or [])]
     fixed_residues = [
@@ -151,6 +217,7 @@ def build_multimodal_context(
         "input_fixed_residues": fixed_residues,
         "input_sequence_length": req.sequence_length,
         "detected_inline_sequence": sequence_source == "task_inline",
+        "gfp_constraint_profile": dict(gfp_constraint_profile or {}),
         "evolution_request": {
             "population_size": req.population_size,
             "elite_size": req.elite_size,
@@ -190,15 +257,17 @@ def resolve_sequence_constraints(
     settings: Any,
     *,
     resolved_sequence: str | None = None,
+    gfp_constraint_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     requested = [
         {"position": item.position, "residue": item.residue.strip().upper()}
         for item in (req.fixed_residues or [])
     ]
-    use_gfp_constraints = "gfp" in req.task.lower()
+    profile = dict(gfp_constraint_profile or {})
+    use_gfp_constraints = bool(profile.get("use_gfp_constraints")) if profile else "gfp" in req.task.lower()
     if use_gfp_constraints:
-        motif_start = int(settings.gfp_chromophore_start)
-        motif = str(settings.gfp_chromophore_motif or "SYG").strip().upper()
+        motif_start = int(profile.get("gfp_chromophore_start") or settings.gfp_chromophore_start)
+        motif = str(profile.get("gfp_chromophore_motif") or settings.gfp_chromophore_motif or "SYG").strip().upper()
         requested.extend(
             {"position": motif_start + index, "residue": residue}
             for index, residue in enumerate(motif)
@@ -216,6 +285,13 @@ def resolve_sequence_constraints(
     return {
         "reference_length": reference_length,
         "fixed_residues": fixed_residues,
+        "gfp_reference_length": int(profile.get("gfp_reference_length") or reference_length or 0),
+        "gfp_chromophore_start": int(profile.get("gfp_chromophore_start") or settings.gfp_chromophore_start),
+        "gfp_chromophore_motif": str(profile.get("gfp_chromophore_motif") or settings.gfp_chromophore_motif or "SYG"),
+        "gfp_chromophore_source": str(profile.get("gfp_chromophore_source") or "settings_default"),
+        "require_gfp_chromophore": bool(
+            profile.get("require_gfp_chromophore", settings.require_gfp_chromophore)
+        ),
     }
 
 
@@ -328,14 +404,21 @@ def ui_status() -> dict[str, Any]:
     return data
 
 
-def build_scoring_summary(settings: Any, best_metadata: dict[str, Any]) -> dict[str, Any]:
+def build_scoring_summary(
+    settings: Any,
+    best_metadata: dict[str, Any],
+    *,
+    sequence_constraints: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    constraints = sequence_constraints or {}
     return {
         "backend": settings.scoring_backend,
         "score_version": best_metadata.get("score_version"),
-        "require_gfp_chromophore": settings.require_gfp_chromophore,
-        "gfp_reference_length": settings.gfp_reference_length,
-        "gfp_chromophore_start": settings.gfp_chromophore_start,
-        "gfp_chromophore_motif": settings.gfp_chromophore_motif,
+        "require_gfp_chromophore": constraints.get("require_gfp_chromophore", settings.require_gfp_chromophore),
+        "gfp_reference_length": constraints.get("gfp_reference_length", settings.gfp_reference_length),
+        "gfp_chromophore_start": constraints.get("gfp_chromophore_start", settings.gfp_chromophore_start),
+        "gfp_chromophore_motif": constraints.get("gfp_chromophore_motif", settings.gfp_chromophore_motif),
+        "gfp_chromophore_source": constraints.get("gfp_chromophore_source"),
         "surrogate_model_path": settings.surrogate_model_path,
         "surrogate_model_type": settings.surrogate_model_type,
         "surrogate_use_structure_features": settings.surrogate_use_structure_features,
@@ -373,6 +456,16 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
     try:
         run_created_at = datetime.now(timezone.utc).isoformat()
         resolved_sequence, sequence_source, normalized_task = resolve_input_sequence(req)
+        requested_fixed_residues = [
+            {"position": item.position, "residue": item.residue.strip().upper()}
+            for item in (req.fixed_residues or [])
+        ]
+        gfp_constraint_profile = resolve_gfp_constraint_profile(
+            req,
+            settings,
+            resolved_sequence=resolved_sequence,
+            requested_fixed_residues=requested_fixed_residues,
+        )
         enriched_task = multimodal_task_text(
             req,
             task_text=normalized_task,
@@ -400,11 +493,13 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
             req,
             resolved_sequence=resolved_sequence,
             sequence_source=sequence_source,
+            gfp_constraint_profile=gfp_constraint_profile,
         )
         multimodal_context["sequence_constraints"] = resolve_sequence_constraints(
             req,
             settings,
             resolved_sequence=resolved_sequence,
+            gfp_constraint_profile=gfp_constraint_profile,
         )
         initial_sequences = build_initial_sequences(
             req,
@@ -419,9 +514,9 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
                 "task": req.task,
                 "created_at": run_created_at,
                 "seed_sequence": seed_prompt,
-                "reference_length": settings.gfp_reference_length,
-                "chromophore_start": settings.gfp_chromophore_start,
-                "chromophore_motif": settings.gfp_chromophore_motif,
+                "reference_length": multimodal_context["sequence_constraints"].get("reference_length"),
+                "chromophore_start": multimodal_context["sequence_constraints"].get("gfp_chromophore_start"),
+                "chromophore_motif": multimodal_context["sequence_constraints"].get("gfp_chromophore_motif"),
                 "sequence_constraints": multimodal_context["sequence_constraints"],
             }
         )
@@ -450,7 +545,11 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
 
         best_record = result.get("best") if isinstance(result, dict) else None
         best_metadata = best_record.get("metadata", {}) if isinstance(best_record, dict) else {}
-        scoring_summary = build_scoring_summary(settings, best_metadata)
+        scoring_summary = build_scoring_summary(
+            settings,
+            best_metadata,
+            sequence_constraints=multimodal_context.get("sequence_constraints"),
+        )
         ensure_active_learning_layout()
         run_artifact_path = timestamped_run_path(req.task, created_at=run_created_at)
         active_model_version = (

@@ -220,6 +220,34 @@ class FirstLayerScoringTests(unittest.TestCase):
         self.assertTrue(record["metadata"]["motif_intact"])
         self.assertEqual(record["metadata"]["fixed_residue_violations"], [])
 
+    def test_request_specific_chromophore_start_allows_65_66_67_scheme(self) -> None:
+        structure = {
+            "mean_plddt": 86.0,
+            "ptm": 0.75,
+            "confidence": 0.86,
+        }
+        result = self.tool.execute(
+            {
+                "sequence": GFP_SCAFFOLD,
+                "structure": structure,
+                "scoring_context": {
+                    **self.scoring_context,
+                    "gfp_reference_length": len(GFP_SCAFFOLD),
+                    "gfp_chromophore_start": 65,
+                    "gfp_chromophore_motif": "SYG",
+                    "fixed_residues": [
+                        {"position": 65, "residue": "S"},
+                        {"position": 66, "residue": "Y"},
+                        {"position": 67, "residue": "G"},
+                    ],
+                },
+            }
+        )
+
+        self.assertTrue(result["valid_candidate"])
+        self.assertEqual(result["metrics"]["motif_start"], 65)
+        self.assertTrue(result["metrics"]["motif_intact"])
+
 
 if __name__ == "__main__":
     unittest.main()

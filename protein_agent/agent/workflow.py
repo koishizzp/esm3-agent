@@ -35,7 +35,10 @@ class ExperimentLoopEngine:
             "use_gfp_constraints": use_gfp_constraints,
             "fixed_residues": sequence_constraints.get("fixed_residues") or [],
             "reference_length": sequence_constraints.get("reference_length"),
-            "gfp_reference_length": sequence_constraints.get("reference_length"),
+            "gfp_reference_length": sequence_constraints.get("gfp_reference_length"),
+            "gfp_chromophore_start": sequence_constraints.get("gfp_chromophore_start"),
+            "gfp_chromophore_motif": sequence_constraints.get("gfp_chromophore_motif"),
+            "require_gfp_chromophore": sequence_constraints.get("require_gfp_chromophore"),
         }
 
     def _resolve_sequence_constraints(
