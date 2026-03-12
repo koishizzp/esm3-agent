@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from protein_agent.agent.executor import ToolExecutor
+from protein_agent.constraints import SequenceConstraints
 from protein_agent.memory.experiment_memory import ExperimentMemory, ExperimentRecord
 
 LOGGER = logging.getLogger(__name__)
@@ -15,17 +16,46 @@ class ExperimentLoopEngine:
         self.executor = executor
         self.memory = memory
 
-    def _build_scoring_context(self, plan: dict[str, Any], task: str) -> dict[str, Any]:
+    def _build_scoring_context(
+        self,
+        plan: dict[str, Any],
+        task: str,
+        multimodal_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         target = str(plan.get("target") or "").strip()
         workflow = str(plan.get("workflow") or "").strip()
         task_text = str(task or "").strip()
         use_gfp_constraints = "gfp" in " ".join([target, workflow, task_text]).lower()
+        context = multimodal_context or {}
+        sequence_constraints = context.get("sequence_constraints") or {}
         return {
             "task": task_text,
             "target": target,
             "workflow": workflow,
             "use_gfp_constraints": use_gfp_constraints,
+            "fixed_residues": sequence_constraints.get("fixed_residues") or [],
+            "reference_length": sequence_constraints.get("reference_length"),
+            "gfp_reference_length": sequence_constraints.get("reference_length"),
         }
+
+    def _resolve_sequence_constraints(
+        self,
+        multimodal_context: dict[str, Any] | None,
+    ) -> SequenceConstraints | None:
+        context = multimodal_context or {}
+        return SequenceConstraints.from_dict(context.get("sequence_constraints"))
+
+    def _normalize_sequence(
+        self,
+        sequence: str,
+        sequence_constraints: SequenceConstraints | None,
+    ) -> str | None:
+        value = (sequence or "").strip().upper()
+        if not value:
+            return None
+        if sequence_constraints is None:
+            return value
+        return sequence_constraints.apply(value)
 
     def _selection_pool(self, records: list[ExperimentRecord]) -> list[ExperimentRecord]:
         valid_records = [
@@ -56,12 +86,14 @@ class ExperimentLoopEngine:
         best_score = float("-inf")
         context = multimodal_context or {}
         generation_stats: list[dict[str, Any]] = []
-        scoring_context = self._build_scoring_context(plan, task)
+        sequence_constraints = self._resolve_sequence_constraints(multimodal_context)
+        scoring_context = self._build_scoring_context(plan, task, multimodal_context)
 
         population = self._initialize_population(
             initial_sequences=initial_sequences,
             seed_prompt=seed_prompt or task,
             population_size=population_size,
+            sequence_constraints=sequence_constraints,
         )
 
         for iteration in range(1, max_iterations + 1):
@@ -119,6 +151,7 @@ class ExperimentLoopEngine:
                 parent_pool_size=parent_pool_size,
                 mutations_per_parent=mutations_per_parent,
                 seed_prompt=seed_prompt or task,
+                sequence_constraints=sequence_constraints,
             )
 
         return {
@@ -137,21 +170,42 @@ class ExperimentLoopEngine:
         initial_sequences: list[str] | None,
         seed_prompt: str,
         population_size: int,
+        sequence_constraints: SequenceConstraints | None = None,
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         seen: set[str] = set()
 
         for sequence in initial_sequences or []:
-            value = (sequence or "").strip().upper()
+            value = self._normalize_sequence(sequence, sequence_constraints)
             if not value or value in seen:
                 continue
             seen.add(value)
             items.append({"sequence": value, "mutation_history": []})
 
+        if len(items) < population_size and items:
+            seed_sequences = [item["sequence"] for item in items]
+            for parent_sequence in seed_sequences:
+                needed = population_size - len(items)
+                if needed <= 0:
+                    break
+                mutated = self.executor.mutate(
+                    parent_sequence,
+                    num_mutations=3,
+                    num_candidates=max(1, min(3, needed)),
+                )
+                for sequence in mutated:
+                    value = self._normalize_sequence(sequence, sequence_constraints)
+                    if not value or value in seen:
+                        continue
+                    seen.add(value)
+                    items.append({"sequence": value, "mutation_history": ["initial_seed_mutate"]})
+                    if len(items) >= population_size:
+                        break
+
         if len(items) < population_size:
             generated = self.executor.generate(seed_prompt, population_size - len(items))
             for sequence in generated:
-                value = (sequence or "").strip().upper()
+                value = self._normalize_sequence(sequence, sequence_constraints)
                 if not value or value in seen:
                     continue
                 seen.add(value)
@@ -198,15 +252,21 @@ class ExperimentLoopEngine:
         parent_pool_size: int,
         mutations_per_parent: int,
         seed_prompt: str,
+        sequence_constraints: SequenceConstraints | None = None,
     ) -> list[dict[str, Any]]:
         if not ranked:
-            return self._initialize_population(initial_sequences=None, seed_prompt=seed_prompt, population_size=population_size)
+            return self._initialize_population(
+                initial_sequences=None,
+                seed_prompt=seed_prompt,
+                population_size=population_size,
+                sequence_constraints=sequence_constraints,
+            )
 
         next_population: list[dict[str, Any]] = []
         seen: set[str] = set()
 
         def add_candidate(sequence: str, mutation_history: list[str]) -> bool:
-            value = (sequence or "").strip().upper()
+            value = self._normalize_sequence(sequence, sequence_constraints)
             if not value or value in seen or len(next_population) >= population_size:
                 return False
             seen.add(value)

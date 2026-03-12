@@ -27,7 +27,21 @@ def _install_test_stubs() -> None:
     sys.modules.setdefault("protein_agent.agent.workflow", workflow_module)
 
     memory_module = types.ModuleType("protein_agent.memory.experiment_memory")
-    memory_module.ExperimentMemory = type("ExperimentMemory", (), {})
+    class StubExperimentMemory:
+        def __init__(self, run_metadata: dict | None = None) -> None:
+            self.run_metadata = dict(run_metadata or {})
+            self.saved_path = None
+
+        def update_run_metadata(self, **updates: object) -> None:
+            for key, value in updates.items():
+                if value is not None:
+                    self.run_metadata[key] = value
+
+        def save_json(self, path: str) -> str:
+            self.saved_path = path
+            return path
+
+    memory_module.ExperimentMemory = StubExperimentMemory
     sys.modules.setdefault("protein_agent.memory.experiment_memory", memory_module)
 
     gfp_module = types.ModuleType("protein_agent.workflows.gfp_optimizer")
@@ -62,8 +76,9 @@ class DummyExecutor:
 
 
 class DummyGFPOptimizer:
-    def __init__(self, executor: DummyExecutor) -> None:
+    def __init__(self, executor: DummyExecutor, memory: object | None = None) -> None:
         self.executor = executor
+        self.memory = memory
 
     def run(
         self,
@@ -119,10 +134,13 @@ class DesignAPITests(unittest.TestCase):
         )
         req = DesignRequest(
             task="Design an improved GFP and iteratively optimize it",
-            sequence="KGEELFTGVV",
+            sequence=(
+                "KGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
+            ),
             max_iterations=1,
             candidates_per_round=2,
             patience=1,
+            fixed_residues=[{"position": 2, "residue": "G"}],
         )
 
         with (
@@ -131,6 +149,7 @@ class DesignAPITests(unittest.TestCase):
             patch("protein_agent.api.main.ToolExecutor", DummyExecutor),
             patch("protein_agent.api.main.build_initial_sequences", return_value=[]),
             patch("protein_agent.api.main.GFPOptimizer", DummyGFPOptimizer),
+            patch("protein_agent.api.main.timestamped_run_path", return_value="/tmp/runs/gfp.json"),
         ):
             result = design_protein(req)
 
@@ -148,6 +167,51 @@ class DesignAPITests(unittest.TestCase):
         self.assertEqual(result["best_candidate"]["metadata"]["score_mode"], "hybrid")
         self.assertTrue(result["best_candidate"]["metadata"]["surrogate_available"])
         self.assertEqual(result["best_candidate"]["metadata"]["model_version"], "xgb_ensemble_v1_randomsplit")
+        self.assertEqual(result["run_artifact_path"], "/tmp/runs/gfp.json")
+        self.assertEqual(result["input_context"]["sequence_constraints"]["reference_length"], 236)
+        self.assertEqual(
+            result["input_context"]["sequence_constraints"]["fixed_residues"],
+            [
+                {"position": 2, "residue": "G"},
+                {"position": 63, "residue": "S"},
+                {"position": 64, "residue": "Y"},
+                {"position": 65, "residue": "G"},
+            ],
+        )
+
+    def test_inline_sequence_in_task_is_promoted_to_reference_sequence(self) -> None:
+        settings = Settings(
+            scoring_backend="hybrid",
+            require_gfp_chromophore=True,
+            gfp_reference_length=236,
+            gfp_chromophore_start=63,
+            gfp_chromophore_motif="SYG",
+        )
+        inline_sequence = (
+            "KGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTTLSYGVQCFSRYPDHMKQHDFFKSAMPEGYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIELKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNTPIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK"
+        )
+        req = DesignRequest(
+            task=f"请基于我给的序列继续优化 GFP：{inline_sequence}",
+            max_iterations=1,
+            candidates_per_round=2,
+            patience=1,
+        )
+
+        with (
+            patch("protein_agent.api.main.get_settings", return_value=settings),
+            patch("protein_agent.api.main.LLMPlanner", DummyPlanner),
+            patch("protein_agent.api.main.ToolExecutor", DummyExecutor),
+            patch("protein_agent.api.main.build_initial_sequences", return_value=[]),
+            patch("protein_agent.api.main.GFPOptimizer", DummyGFPOptimizer),
+            patch("protein_agent.api.main.timestamped_run_path", return_value="/tmp/runs/gfp_inline.json"),
+        ):
+            result = design_protein(req)
+
+        self.assertEqual(result["input_context"]["input_sequence"], inline_sequence)
+        self.assertEqual(result["input_context"]["input_sequence_source"], "task_inline")
+        self.assertTrue(result["input_context"]["detected_inline_sequence"])
+        self.assertEqual(result["input_context"]["sequence_constraints"]["reference_length"], len(inline_sequence))
+        self.assertEqual(result["best_candidate"]["sequence"], inline_sequence)
 
 
 if __name__ == "__main__":

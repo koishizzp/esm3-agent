@@ -1,9 +1,11 @@
 """REST API for autonomous protein design."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import lru_cache
 import logging
 from pathlib import Path
+import re
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -16,12 +18,20 @@ from protein_agent.agent.planner import LLMPlanner
 from protein_agent.agent.reasoner import ResultReasoner
 from protein_agent.agent.workflow import ExperimentLoopEngine
 from protein_agent.config.settings import get_settings
+from protein_agent.constraints import merge_fixed_residues
 from protein_agent.memory.experiment_memory import ExperimentMemory
+from protein_agent.memory.storage import ensure_active_learning_layout, timestamped_run_path
 from protein_agent.workflows.gfp_optimizer import GFPOptimizer
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
 app = FastAPI(title="Autonomous Protein Design Agent", version="1.0.0")
+
+AA_ALPHABET = set("ACDEFGHIKLMNPQRSTVWY")
+INLINE_AA_SEQUENCE_PATTERN = re.compile(
+    r"(?<![A-Za-z])([ACDEFGHIKLMNPQRSTVWY]{30,})(?![A-Za-z])",
+    re.IGNORECASE,
+)
 
 
 @lru_cache(maxsize=1)
@@ -44,6 +54,11 @@ class FunctionAnnotationInput(BaseModel):
     end: int | None = Field(default=None, ge=1)
 
 
+class FixedResidueInput(BaseModel):
+    position: int = Field(..., ge=1)
+    residue: str = Field(..., min_length=1, max_length=1)
+
+
 class DesignRequest(BaseModel):
     task: str = Field(..., description="Natural language protein engineering request")
     max_iterations: int | None = Field(default=None, ge=1, le=100)
@@ -59,6 +74,7 @@ class DesignRequest(BaseModel):
     pdb_text: str | None = None
     function_annotations: list[FunctionAnnotationInput] | None = None
     function_keywords: list[str] | None = None
+    fixed_residues: list[FixedResidueInput] | None = None
 
 
 class ChatMessage(BaseModel):
@@ -74,15 +90,67 @@ class ChatReasoningRequest(BaseModel):
     previous_best_sequence: str | None = None
 
 
-def build_multimodal_context(req: DesignRequest) -> dict[str, Any]:
+def _normalize_amino_acid_sequence(value: str | None) -> str | None:
+    cleaned = re.sub(r"\s+", "", str(value or "")).strip().upper()
+    if not cleaned:
+        return None
+    if set(cleaned) - AA_ALPHABET:
+        return None
+    return cleaned
+
+
+def _extract_inline_sequence(task: str | None) -> str | None:
+    text = str(task or "")
+    matches = [
+        _normalize_amino_acid_sequence(match.group(1))
+        for match in INLINE_AA_SEQUENCE_PATTERN.finditer(text)
+    ]
+    valid = [item for item in matches if item]
+    if not valid:
+        return None
+    return max(valid, key=len)
+
+
+def _strip_inline_sequence(task: str, sequence: str | None) -> str:
+    if not sequence:
+        return task
+    cleaned = re.sub(re.escape(sequence), " [已识别参考序列] ", task, count=1, flags=re.IGNORECASE)
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+
+
+def resolve_input_sequence(req: DesignRequest) -> tuple[str | None, str | None, str]:
+    explicit = _normalize_amino_acid_sequence(req.sequence)
+    if explicit:
+        return explicit, "field", req.task
+
+    inline = _extract_inline_sequence(req.task)
+    if inline:
+        return inline, "task_inline", _strip_inline_sequence(req.task, inline)
+
+    return None, None, req.task
+
+
+def build_multimodal_context(
+    req: DesignRequest,
+    *,
+    resolved_sequence: str | None = None,
+    sequence_source: str | None = None,
+) -> dict[str, Any]:
     annotations = [item.model_dump() for item in (req.function_annotations or [])]
+    fixed_residues = [
+        {"position": item.position, "residue": item.residue.strip().upper()}
+        for item in (req.fixed_residues or [])
+    ]
     return {
-        "input_sequence": req.sequence,
+        "input_sequence": resolved_sequence,
+        "input_sequence_source": sequence_source,
         "input_pdb_path": req.pdb_path,
         "input_pdb_text": bool(req.pdb_text and req.pdb_text.strip()),
         "input_function_annotations": annotations,
         "input_function_keywords": req.function_keywords or [],
+        "input_fixed_residues": fixed_residues,
         "input_sequence_length": req.sequence_length,
+        "detected_inline_sequence": sequence_source == "task_inline",
         "evolution_request": {
             "population_size": req.population_size,
             "elite_size": req.elite_size,
@@ -92,10 +160,16 @@ def build_multimodal_context(req: DesignRequest) -> dict[str, Any]:
     }
 
 
-def multimodal_task_text(req: DesignRequest) -> str:
+def multimodal_task_text(
+    req: DesignRequest,
+    *,
+    task_text: str | None = None,
+    resolved_sequence: str | None = None,
+) -> str:
+    base_task = task_text if task_text is not None else req.task
     extras: list[str] = []
-    if req.sequence:
-        extras.append(f"已提供参考序列：{req.sequence}")
+    if resolved_sequence:
+        extras.append(f"已提供参考序列：{resolved_sequence}")
     if req.pdb_path:
         extras.append(f"已提供结构文件路径：{req.pdb_path}")
     elif req.pdb_text:
@@ -108,18 +182,53 @@ def multimodal_task_text(req: DesignRequest) -> str:
     if req.sequence_length:
         extras.append(f"目标长度：{req.sequence_length}")
     if not extras:
-        return req.task
-    return req.task + "\n\n多模态上下文：\n- " + "\n- ".join(extras)
+        return base_task
+    return base_task + "\n\n多模态上下文：\n- " + "\n- ".join(extras)
+
+def resolve_sequence_constraints(
+    req: DesignRequest,
+    settings: Any,
+    *,
+    resolved_sequence: str | None = None,
+) -> dict[str, Any]:
+    requested = [
+        {"position": item.position, "residue": item.residue.strip().upper()}
+        for item in (req.fixed_residues or [])
+    ]
+    use_gfp_constraints = "gfp" in req.task.lower()
+    if use_gfp_constraints:
+        motif_start = int(settings.gfp_chromophore_start)
+        motif = str(settings.gfp_chromophore_motif or "SYG").strip().upper()
+        requested.extend(
+            {"position": motif_start + index, "residue": residue}
+            for index, residue in enumerate(motif)
+        )
+
+    fixed_residues = merge_fixed_residues(requested) if requested else []
+    reference_length = None
+    if resolved_sequence:
+        reference_length = len(resolved_sequence)
+    elif req.sequence_length:
+        reference_length = int(req.sequence_length)
+    elif use_gfp_constraints:
+        reference_length = int(settings.gfp_reference_length)
+
+    return {
+        "reference_length": reference_length,
+        "fixed_residues": fixed_residues,
+    }
 
 
 def build_initial_sequences(
     req: DesignRequest,
     executor: ToolExecutor,
     candidates_per_round: int,
+    *,
+    resolved_sequence: str | None = None,
 ) -> list[str]:
     items: list[str] = []
-    if req.sequence and req.sequence.strip():
-        items.append(req.sequence.strip().upper())
+    if resolved_sequence:
+        items.append(resolved_sequence)
 
     if req.pdb_path or (req.pdb_text and req.pdb_text.strip()):
         items.extend(
@@ -135,7 +244,7 @@ def build_initial_sequences(
     if req.function_keywords or req.function_annotations:
         annotations = [item.model_dump() for item in (req.function_annotations or [])]
         generated = executor.generate_with_function(
-            sequence=req.sequence,
+            sequence=resolved_sequence,
             sequence_length=req.sequence_length,
             function_annotations=annotations,
             function_keywords=req.function_keywords,
@@ -219,6 +328,24 @@ def ui_status() -> dict[str, Any]:
     return data
 
 
+def build_scoring_summary(settings: Any, best_metadata: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "backend": settings.scoring_backend,
+        "score_version": best_metadata.get("score_version"),
+        "require_gfp_chromophore": settings.require_gfp_chromophore,
+        "gfp_reference_length": settings.gfp_reference_length,
+        "gfp_chromophore_start": settings.gfp_chromophore_start,
+        "gfp_chromophore_motif": settings.gfp_chromophore_motif,
+        "surrogate_model_path": settings.surrogate_model_path,
+        "surrogate_model_type": settings.surrogate_model_type,
+        "surrogate_use_structure_features": settings.surrogate_use_structure_features,
+        "surrogate_ensemble_size": settings.surrogate_ensemble_size,
+        "surrogate_feature_backend": settings.surrogate_feature_backend,
+        "use_rosetta": settings.use_rosetta,
+        "rosetta_topn": settings.rosetta_topn,
+    }
+
+
 @app.post("/chat_reasoning")
 def chat_reasoning(req: ChatReasoningRequest) -> dict[str, Any]:
     settings = get_settings()
@@ -244,7 +371,13 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
     executor = ToolExecutor(settings)
 
     try:
-        enriched_task = multimodal_task_text(req)
+        run_created_at = datetime.now(timezone.utc).isoformat()
+        resolved_sequence, sequence_source, normalized_task = resolve_input_sequence(req)
+        enriched_task = multimodal_task_text(
+            req,
+            task_text=normalized_task,
+            resolved_sequence=resolved_sequence,
+        )
         plan = planner.plan(enriched_task)
         plan["input_modalities"] = {
             "sequence": bool(req.sequence),
@@ -263,12 +396,38 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
             "parent_pool_size": req.parent_pool_size or max(2, min(max(candidates_per_round, 4), candidates_per_round * 2)),
             "mutations_per_parent": req.mutations_per_parent or 3,
         }
-        multimodal_context = build_multimodal_context(req)
-        initial_sequences = build_initial_sequences(req, executor, candidates_per_round)
-        seed_prompt = req.sequence.strip().upper() if req.sequence and req.sequence.strip() else None
+        multimodal_context = build_multimodal_context(
+            req,
+            resolved_sequence=resolved_sequence,
+            sequence_source=sequence_source,
+        )
+        multimodal_context["sequence_constraints"] = resolve_sequence_constraints(
+            req,
+            settings,
+            resolved_sequence=resolved_sequence,
+        )
+        initial_sequences = build_initial_sequences(
+            req,
+            executor,
+            candidates_per_round,
+            resolved_sequence=resolved_sequence,
+        )
+        seed_prompt = resolved_sequence
+        memory = ExperimentMemory(
+            run_metadata={
+                "schema_version": 1,
+                "task": req.task,
+                "created_at": run_created_at,
+                "seed_sequence": seed_prompt,
+                "reference_length": settings.gfp_reference_length,
+                "chromophore_start": settings.gfp_chromophore_start,
+                "chromophore_motif": settings.gfp_chromophore_motif,
+                "sequence_constraints": multimodal_context["sequence_constraints"],
+            }
+        )
 
         if "gfp" in req.task.lower():
-            workflow = GFPOptimizer(executor)
+            workflow = GFPOptimizer(executor, memory=memory)
             result = workflow.run(
                 task=enriched_task,
                 max_iterations=max_iterations,
@@ -280,7 +439,6 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
                 evolution_config=plan.get("evolution", {}),
             )
         else:
-            memory = ExperimentMemory()
             loop_engine = ExperimentLoopEngine(executor, memory)
             result = loop_engine.run(
                 plan=plan,
@@ -292,6 +450,23 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
 
         best_record = result.get("best") if isinstance(result, dict) else None
         best_metadata = best_record.get("metadata", {}) if isinstance(best_record, dict) else {}
+        scoring_summary = build_scoring_summary(settings, best_metadata)
+        ensure_active_learning_layout()
+        run_artifact_path = timestamped_run_path(req.task, created_at=run_created_at)
+        active_model_version = (
+            best_metadata.get("model_version")
+            or (Path(settings.surrogate_model_path).name if settings.surrogate_model_path else None)
+        )
+        memory.update_run_metadata(
+            plan=plan,
+            input_context=multimodal_context,
+            generation_stats=result.get("generation_stats", []),
+            evolution_config=result.get("evolution_config", plan.get("evolution", {})),
+            scoring=scoring_summary,
+            surrogate_model_version=active_model_version,
+            run_artifact_path=str(run_artifact_path),
+        )
+        memory.save_json(run_artifact_path)
 
         return {
             "task": req.task,
@@ -302,21 +477,8 @@ def design_protein(req: DesignRequest) -> dict[str, Any]:
             "best_candidate": result["best"],
             "generation_stats": result.get("generation_stats", []),
             "evolution_config": result.get("evolution_config", plan.get("evolution", {})),
-            "scoring": {
-                "backend": settings.scoring_backend,
-                "score_version": best_metadata.get("score_version"),
-                "require_gfp_chromophore": settings.require_gfp_chromophore,
-                "gfp_reference_length": settings.gfp_reference_length,
-                "gfp_chromophore_start": settings.gfp_chromophore_start,
-                "gfp_chromophore_motif": settings.gfp_chromophore_motif,
-                "surrogate_model_path": settings.surrogate_model_path,
-                "surrogate_model_type": settings.surrogate_model_type,
-                "surrogate_use_structure_features": settings.surrogate_use_structure_features,
-                "surrogate_ensemble_size": settings.surrogate_ensemble_size,
-                "surrogate_feature_backend": settings.surrogate_feature_backend,
-                "use_rosetta": settings.use_rosetta,
-                "rosetta_topn": settings.rosetta_topn,
-            },
+            "scoring": scoring_summary,
+            "run_artifact_path": str(run_artifact_path),
         }
     except Exception as exc:
         LOGGER.exception("Protein design execution failed")

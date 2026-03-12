@@ -110,8 +110,8 @@ class Settings:
     use_gpu: bool = True
     scoring_backend: str = "structure"
     require_gfp_chromophore: bool = True
-    gfp_reference_length: int = 238
-    gfp_chromophore_start: int = 65
+    gfp_reference_length: int = 236
+    gfp_chromophore_start: int = 63
     gfp_chromophore_motif: str = "SYG"
     surrogate_model_path: str | None = None
     surrogate_model_type: str = "xgboost"

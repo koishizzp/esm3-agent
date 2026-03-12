@@ -711,7 +711,7 @@
         <p class="section-label">建议提示词</p>
         <div class="hint-stack">
           <div class="hint-card"><strong>GFP 自动优化</strong><p>请自动设计 GFP 并迭代优化，同时输出最佳候选与关键评分解释。</p></div>
-          <div class="hint-card"><strong>约束式设计</strong><p>请自动设计 GFP，尽量保留 GSG motif，并避免使用 C。</p></div>
+          <div class="hint-card"><strong>约束式设计</strong><p>请自动设计 GFP，强制保留 SYG 色团位点，并继续围绕当前参考序列局部优化。</p></div>
           <div class="hint-card"><strong>继续上一轮</strong><p>基于上一轮最佳序列继续优化，并做更严格筛选。</p></div>
         </div>
       </section>
@@ -738,7 +738,7 @@
       <section id="chatWindow" class="chat-window" aria-live="polite"></section>
 
       <section class="composer">
-        <textarea id="prompt" placeholder="例如：请自动设计 GFP 并迭代优化，尽量保留 GSG motif，避免 C，并解释为什么当前最佳候选更值得下一轮验证。&#10;&#10;按 Ctrl/Cmd + Enter 可直接发送。"></textarea>
+        <textarea id="prompt" placeholder="例如：请自动设计 GFP 并迭代优化，强制保留 SYG 色团位点，并解释为什么当前最佳候选更值得下一轮验证。&#10;&#10;按 Ctrl/Cmd + Enter 可直接发送。"></textarea>
         <div class="mode-grid">
           <button class="mode-card active" type="button" data-mode="design"><strong>迭代设计</strong><span>调用 `/design_protein`，适合 GFP 与多轮优化任务。</span></button>
           <button class="mode-card" type="button" data-mode="inverse_fold"><strong>逆折叠</strong><span>给定 PDB 结构，生成候选序列。</span></button>
@@ -758,7 +758,7 @@
           <div class="mode-panel-grid">
             <div class="field"><label for="mutationsPerParent">每个父代突变位点数</label><input id="mutationsPerParent" type="number" min="1" max="64" value="3" /></div>
           </div>
-          <div class="mode-help">高级输入会进入同一个 `POST /design_protein` 请求，用于多模态推理：文本任务 + 参考序列 + 结构 + 功能约束。</div>
+          <div class="mode-help">高级输入会进入同一个 `POST /design_protein` 请求，用于多模态推理：文本任务 + 参考序列 + 结构 + 功能约束。如果你把一段很长的氨基酸序列直接粘进任务文本，而没有填“参考序列”，后端也会自动尝试识别它。</div>
           <div class="mode-panel-grid">
             <div class="field"><label for="designSequence">参考序列（可选）</label><input id="designSequence" type="text" placeholder="可作为初始 seed sequence" /></div>
             <div class="field"><label for="designSequenceLength">目标长度（可选）</label><input id="designSequenceLength" type="number" min="1" max="4096" placeholder="留空则不显式约束长度" /></div>
@@ -774,6 +774,7 @@
             <div class="field"><label for="designFunctionKeywords">功能关键词（逗号分隔）</label><input id="designFunctionKeywords" type="text" placeholder="fluorescent protein, chromophore" /></div>
             <div class="field"><label for="designAnnotationPreset">功能注释模板</label><input id="designAnnotationPreset" type="text" placeholder="例如 fluorescent protein" /></div>
           </div>
+          <div class="field"><label for="designFixedResidues">固定残基（可选）</label><textarea id="designFixedResidues" placeholder="例如：63:S, 64:Y, 65:G&#10;也支持每行一个：96 R"></textarea></div>
           <div class="inline-tools">
             <button id="addDesignAnnotationBtn" class="ghost" type="button">插入多模态注释模板</button>
             <button id="clearDesignAnnotationsBtn" class="ghost" type="button">清空多模态注释 JSON</button>
@@ -819,7 +820,7 @@
           <label class="toggle"><input id="carryBestToggle" type="checkbox" checked /> 自动带上上一轮最佳序列</label>
           <div class="quick-actions">
             <button class="secondary" data-q="请自动设计 GFP 并迭代优化">GFP 自动优化</button>
-            <button class="secondary" data-q="请自动设计 GFP，并尽量保留 GSG motif">保留 GSG motif</button>
+            <button class="secondary" data-q="请自动设计 GFP，并强制保留 SYG 色团位点">保留 SYG 色团</button>
             <button class="secondary" data-q="请自动设计 GFP，避免使用 C，并做更严格筛选">避免 C + 严格筛选</button>
           </div>
         </div>
@@ -903,6 +904,7 @@
     const clearDesignPdbBtn = document.getElementById('clearDesignPdbBtn');
     const designFunctionKeywordsEl = document.getElementById('designFunctionKeywords');
     const designAnnotationPresetEl = document.getElementById('designAnnotationPreset');
+    const designFixedResiduesEl = document.getElementById('designFixedResidues');
     const designFunctionAnnotationsEl = document.getElementById('designFunctionAnnotations');
     const addDesignAnnotationBtn = document.getElementById('addDesignAnnotationBtn');
     const clearDesignAnnotationsBtn = document.getElementById('clearDesignAnnotationsBtn');
@@ -1123,8 +1125,10 @@
       const reasoningPattern = /(解释|分析|为什么|为何|理由|依据|怎么看|评价|总结|概括|对比|比较|是否值得|适合验证|更适合|优先验证|风险|下一步|候选)/i;
       const actionPattern = /(自动设计|设计|生成|优化|迭代|继续优化|继续跑|重新|再来|筛选|打分|突变|逆折叠|inverse fold|function-conditioned|功能条件)/i;
       if (!reasoningPattern.test(text)) return false;
+      if (actionPattern.test(text)) return false;
+      if (!latestResult) return false;
       if (/(当前|这个|该|上一轮|候选|最佳序列|结果)/i.test(text)) return true;
-      return !actionPattern.test(text);
+      return true;
     }
 
     function parseFunctionAnnotations() {
@@ -1147,6 +1151,25 @@
       } catch {
         throw new Error('多模态功能注释 JSON 解析失败，请检查格式');
       }
+    }
+
+    function parseDesignFixedResidues() {
+      const raw = designFixedResiduesEl.value.trim();
+      if (!raw) return [];
+      return raw
+        .split(/[\n,;]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => {
+          const match = item.match(/^(\d+)\s*[:=\-\s]\s*([A-Za-z])$/);
+          if (!match) {
+            throw new Error('固定残基格式错误，请使用如 63:S 或 96 R');
+          }
+          return {
+            position: Number(match[1]),
+            residue: match[2].toUpperCase(),
+          };
+        });
     }
 
     function buildExecutionRequest(content) {
@@ -1201,6 +1224,7 @@
           pdb_text: designStructureTextEl.value.trim() || null,
           function_keywords: designFunctionKeywordsEl.value.split(',').map((item) => item.trim()).filter(Boolean),
           function_annotations: parseDesignAnnotations(),
+          fixed_residues: parseDesignFixedResidues(),
         },
       };
     }
@@ -1228,7 +1252,9 @@
     }
 
     function topRecords(records, limit = 6) {
-      return [...(records || [])].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, limit);
+      const items = records || [];
+      const valid = items.filter((record) => record?.metadata?.valid_candidate !== false);
+      return [...(valid.length ? valid : items)].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, limit);
     }
 
     function formatMetric(value, digits = 3) {
@@ -1291,7 +1317,7 @@
       const bestRecord = getBestRecord(best, records);
       const plan = result?.plan || {};
       const generationStats = result?.generation_stats || [];
-      if (!best) return '这次任务已经执行，但我还没解析到可靠的最佳序列。建议先看右侧完整 JSON 排查返回结构。';
+      if (!best) return '这次任务已经执行，但当前没有通过硬约束筛选的可靠最佳序列。建议先看右侧完整 JSON，重点检查 `valid_candidate`、长度约束和固定残基。';
       const ranked = topRecords(records, 2);
       const gap = ranked.length > 1 ? Number((ranked[0].score ?? 0) - (ranked[1].score ?? 0)).toFixed(4) : null;
       const firstGen = generationStats[0]?.best_score;

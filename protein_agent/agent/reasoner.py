@@ -20,6 +20,11 @@ def _score_value(item: dict[str, Any]) -> float:
     return float(value) if isinstance(value, (int, float)) else float("-inf")
 
 
+def _is_valid_candidate(item: dict[str, Any]) -> bool:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return metadata.get("valid_candidate", True) is not False
+
+
 class ResultReasoner:
     """Explains current candidates using an LLM when available, with deterministic fallback."""
 
@@ -94,7 +99,7 @@ class ResultReasoner:
         if not normalized:
             return None
         history = normalized.get("history") or []
-        ranked = sorted(history, key=_score_value, reverse=True)
+        ranked = sorted(self._eligible_history(history), key=_score_value, reverse=True)
         top_records: list[dict[str, Any]] = []
         for item in ranked[:6]:
             metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
@@ -123,10 +128,10 @@ class ResultReasoner:
         if not latest_result:
             return None
         if latest_result.get("best_sequences"):
-            return latest_result
+            return self._prefer_valid_best(latest_result)
         best_candidate = latest_result.get("best_candidate")
         if not isinstance(best_candidate, dict):
-            return latest_result
+            return self._prefer_valid_best(latest_result)
         all_candidates = latest_result.get("all_candidates") or []
         history: list[dict[str, Any]] = []
         for item in all_candidates:
@@ -150,7 +155,7 @@ class ResultReasoner:
         best_reason = best_candidate.get("reason")
         if isinstance(best_reason, str) and best_reason.strip():
             best_mutation_history.append(best_reason.strip())
-        return {
+        normalized = {
             "task": latest_result.get("task") or latest_result.get("objective") or "",
             "plan": latest_result.get("plan") or {},
             "input_context": latest_result.get("input_context") or {},
@@ -165,6 +170,20 @@ class ResultReasoner:
             "generation_stats": latest_result.get("generation_stats") or [],
             "history": history,
         }
+        return self._prefer_valid_best(normalized)
+
+    def _eligible_history(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        valid = [item for item in history if _is_valid_candidate(item)]
+        return valid or history
+
+    def _prefer_valid_best(self, normalized: dict[str, Any]) -> dict[str, Any]:
+        best = normalized.get("best_sequences")
+        history = normalized.get("history") or []
+        if isinstance(best, dict) and _is_valid_candidate(best):
+            return normalized
+        ranked = sorted(self._eligible_history(history), key=_score_value, reverse=True)
+        normalized["best_sequences"] = ranked[0] if ranked else None
+        return normalized
 
     def _fallback_reply(
         self,
@@ -188,7 +207,7 @@ class ResultReasoner:
             )
 
         history = normalized.get("history") or []
-        ranked = sorted(history, key=_score_value, reverse=True)
+        ranked = sorted(self._eligible_history(history), key=_score_value, reverse=True)
         best_score = float(best.get("score") or 0)
         best_iteration = best.get("iteration") or "-"
         second_score = None

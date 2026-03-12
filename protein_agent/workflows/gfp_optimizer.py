@@ -8,9 +8,9 @@ from protein_agent.memory.experiment_memory import ExperimentMemory
 
 
 class GFPOptimizer:
-    def __init__(self, executor: ToolExecutor) -> None:
+    def __init__(self, executor: ToolExecutor, memory: ExperimentMemory | None = None) -> None:
         self.executor = executor
-        self.memory = ExperimentMemory()
+        self.memory = memory or ExperimentMemory()
         self.loop_engine = ExperimentLoopEngine(executor, self.memory)
 
     def run(

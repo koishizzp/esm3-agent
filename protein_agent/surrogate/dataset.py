@@ -21,7 +21,7 @@ NUCLEOTIDE_ALPHABET = set("ACGTUN")
 class GFPDatasetConfig:
     reference_sequence: str = GFP_SCAFFOLD
     reference_name: str = "avGFP"
-    chromophore_start: int = 65
+    chromophore_start: int = 63
     chromophore_motif: str = "SYG"
     random_seed: int = 7
     train_max_mutations: int = 3

@@ -18,7 +18,7 @@ AA_INDEX = {aa: index for index, aa in enumerate(AA_ORDER)}
 @dataclass(slots=True)
 class FeatureConfig:
     reference_sequence: str = GFP_SCAFFOLD
-    chromophore_start: int = 65
+    chromophore_start: int = 63
     chromophore_motif: str = "SYG"
     feature_backend: str = "mutation"
     include_sequence_stats: bool = True

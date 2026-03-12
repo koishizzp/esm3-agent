@@ -834,26 +834,300 @@ protein_agent/
 
 ---
 
-## 9. 最后给你的明确建议
+## 9. 如果以后还要设计其他蛋白，建议现在就补上的通用化改造
+
+你这份方案已经能很好地支撑 **GFP-first** 的落地，但如果你明确知道后面还要做其他蛋白，那么建议现在就把下面这些“架构层”的东西补进去。否则后面很容易出现一种情况：GFP 方案能跑，但一换目标蛋白就要大改 API、memory、scoring 和 surrogate。
+
+### 9.1 先统一 reference contract，不要让坐标体系漂移
+
+这是优先级最高的补强点。
+
+当前仓库里其实已经出现了两套 GFP 参考体系：
+
+- 一套是文档里这份计划使用的 `238 aa / 65-67 / full-length scaffold`
+- 另一套是后续 Phase 2 和硬约束文档里使用的 `236 aa / 63-65 / mature avGFP`
+
+这件事如果在 GFP 阶段都不彻底统一，后面迁移到其他蛋白会更麻烦，因为别的目标蛋白也常常会遇到：
+
+- 信号肽切除前后编号不同；
+- pro-peptide 和 mature form 编号不同；
+- 文献编号、PDB 编号、实验构建编号不一致；
+- N 端或 C 端带 tag，导致 mutation token 不可直接映射。
+
+建议把“参考坐标 contract”明确成一等公民，至少固定以下字段：
+
+- `reference_id`
+- `reference_name`
+- `reference_sequence`
+- `reference_length`
+- `coordinate_system`
+- `mature_offset`
+- `reference_hash`
+- `constraint_positions`
+
+然后要求以下所有模块都只认这份 canonical contract：
+
+- 数据清洗脚本
+- 评分模块
+- 约束检查
+- memory 落盘
+- 主动学习数据集构建
+
+这样以后无论是 GFP、酶、抗体片段还是 binder，坐标体系都不会散掉。
+
+### 9.2 把 “是不是 GFP” 的字符串判断，升级成 TargetProfile
+
+现在仓库里多处逻辑本质上还是：
+
+- task 里包含 `gfp`
+- 就启用 GFP 约束
+- 就走 GFP surrogate
+
+这对当前阶段够用，但它不是一个可扩展架构。
+
+建议新增一个显式的 `TargetProfile` 概念，替代散落在代码里的 `gfp_*` 特判。一个最小 profile 可以长这样：
+
+```yaml
+target_id: gfp
+target_type: soluble_monomer
+reference:
+  sequence: ...
+  coordinate_system: mature_avGFP_236
+objectives:
+  primary_assay: fluorescence
+  direction: maximize
+constraints:
+  fixed_residues:
+    - {position: 63, residue: S}
+    - {position: 64, residue: Y}
+    - {position: 65, residue: G}
+  allowed_length_range: [236, 236]
+structure_scoring:
+  enabled_metrics: [mean_plddt, ptm]
+surrogate:
+  task_type: regression
+  model_family: xgboost_ensemble
+```
+
+建议后面把这些位置都改成“吃 profile”而不是“猜是不是 GFP”：
+
+- `protein_agent/api/main.py`
+- `protein_agent/agent/workflow.py`
+- `protein_agent/tools/protein_score.py`
+- `protein_agent/agent/executor.py`
+- `protein_agent/surrogate/*`
+
+这样未来新增一个目标蛋白时，优先是“新建一个 profile”，而不是“复制一份 GFP 代码再手改”。
+
+### 9.3 把硬约束系统做成声明式，而不是只服务于色团 motif
+
+当前你已经在 GFP 上验证了一个很重要的工程原则：**关键位点不能只写在 prompt 里**。
+
+下一步建议把它再抽象一层，让约束系统不再默认自己服务于 `SYG`，而是支持更通用的 constraint types，例如：
+
+- 固定残基
+- motif 保留
+- 长度范围
+- 禁止位点
+- 允许突变位点白名单
+- 二硫键配对
+- 催化位点保留
+- 接口位点保留
+- 避免引入 glycosylation / cleavage 等风险 motif
+
+形式上最好是声明式 schema，而不是继续写成 `require_gfp_chromophore` 这种单目标布尔量。因为以后你做的很多蛋白根本没有 chromophore，但同样会有“必须不动”的功能核心。
+
+### 9.4 把 assay schema 标准化，不要把 surrogate 默认等同于“荧光回归”
+
+这份方案第二层现在默认的是：
+
+- 输入序列
+- 输出荧光强度
+
+这对于 GFP 是对的，但一旦换到其他蛋白，标签可能变成：
+
+- 酶活
+- 热稳定性
+- 表达量
+- 结合亲和力
+- 抑制率
+- 存活率
+- 分类标签而不是回归值
+
+所以建议你现在就把 dataset / surrogate 的标签 schema 标准化，至少统一这些字段：
+
+- `assay_name`
+- `assay_type`
+- `label_name`
+- `label_value`
+- `label_unit`
+- `label_transform`
+- `optimization_direction`
+- `batch_id`
+- `condition`
+- `replicate_count`
+- `label_std`
+
+这样后面 surrogate 才不会在接口层被绑死成 `predicted_fluorescence` 这一种输出。
+
+### 9.5 把 surrogate 抽象成统一接口，允许 target-specific feature plugin
+
+现在的命名和实现还是明显偏 GFP：
+
+- `GFPFluorescencePredictor`
+- `GFPDatasetConfig`
+- `FeatureConfig` 默认引用 GFP scaffold
+
+建议后续拆成两层：
+
+1. 通用层：
+   - `SurrogatePredictor`
+   - `DatasetConfig`
+   - `FeatureExtractor`
+2. 目标层：
+   - `GFPProfileFeaturePlugin`
+   - `EnzymeActiveSiteFeaturePlugin`
+   - `BinderInterfaceFeaturePlugin`
+
+这样你就可以把“序列 embedding + 通用结构特征 + 目标特有规则特征”分开管理。
+
+对于其他蛋白，真正会变化的往往不是整个训练框架，而是：
+
+- 参考序列
+- 对齐方式
+- 关键位点特征
+- 结构打分分量
+- 标签定义
+
+### 9.6 把离群检测、校准和探索策略提前设计进去
+
+GFP 有公开 DMS 数据，做 surrogate 相对舒服；但以后很多目标蛋白可能只有几十到几百个样本。
+
+这种场景下，比“预测均值”更重要的是：
+
+- 这个点是不是分布外；
+- 这个不确定性是不是校准过；
+- 这个 top-k 是不是全挤在一个局部序列邻域里。
+
+所以建议把下面这些字段提前纳入 memory 和模型产物：
+
+- `prediction_std`
+- `train_distance`
+- `novelty_score`
+- `calibration_version`
+- `acquisition_score`
+
+这样后面你做 active learning 的时候，才能自然切到：
+
+- exploit：高预测值
+- explore：高不确定性
+- diversify：高新颖度 / 低聚类密度
+
+### 9.7 给不同蛋白预留多目标优化接口
+
+GFP 相对单纯，因为你现在主目标很明确，就是亮度。
+
+但其他蛋白常见的真实目标是：
+
+- 活性更高
+- 稳定性更高
+- 表达更好
+- 聚集更少
+- 特异性更强
+- 脱靶更低
+
+这时再把所有东西硬压成一个单值 `score` 往往会过早丢信息。
+
+建议你至少在 schema 层支持：
+
+- `primary_objective`
+- `secondary_objectives`
+- `hard_constraints`
+- `soft_objective_weights`
+
+即便线上排序最后还是单值，也建议在 memory 里把多目标分量完整保留。这样以后要切 Pareto ranking 或 constrained optimization 时，不需要回头重做存储层。
+
+### 9.8 做一个统一的 retrospective benchmark harness
+
+如果后面真要做多个蛋白，强烈建议不要每个目标都“训练一次看着还行就上线”。
+
+更稳妥的方式是统一做一个 retrospective harness，用历史数据离线比较：
+
+- random selection
+- greedy top-k
+- uncertainty sampling
+- diversity-aware top-k
+- hybrid acquisition
+
+每个目标至少固定输出：
+
+- split 方案
+- ranking 指标
+- top-k hit rate
+- calibration 指标
+- novelty 分布
+- active-learning 模拟曲线
+
+这会让你后面做新蛋白时非常快，因为你不需要重新发明一套评估方法。
+
+### 9.9 memory 和模型版本字段再往前走一步
+
+你文档里已经强调版本管理，这个方向是对的，但如果以后会跨蛋白复用，建议版本信息再细一层：
+
+- `target_id`
+- `target_profile_version`
+- `reference_id`
+- `reference_hash`
+- `constraint_profile_version`
+- `dataset_version`
+- `split_version`
+- `feature_version`
+- `model_version`
+- `calibration_version`
+- `scoring_formula_version`
+
+这样你将来看到一条历史记录时，能知道它到底是：
+
+- 哪个蛋白；
+- 用哪套参考坐标；
+- 哪个 surrogate；
+- 哪个 acquisition 策略；
+- 哪套约束规则。
+
+### 9.10 建议的优先级
+
+如果你不想一下子做太多，我建议按这个顺序补：
+
+1. **先补**：统一 reference contract，消除 `238/65` 和 `236/63` 两套 GFP 坐标并存的问题。
+2. **接着补**：引入 `TargetProfile`，把 `gfp` 字符串判断从 API / workflow / scoring / surrogate 中拿掉。
+3. **然后补**：把约束、assay schema、surrogate 接口都改成 protein-agnostic。
+4. **最后补**：再上多目标优化、OOD、校准和更复杂的 acquisition。
+
+---
+
+## 10. 最后给你的明确建议
 
 如果只看“现在最该做什么”，建议是：
 
 ### 立刻做
 
-1. 把 `protein_score.py` 从启发式比例打分改成 `mean_pLDDT + pTM + SYG约束`；
-2. 把 `bridge.py` 的结构输出变成稳定 schema；
-3. 把 `score_breakdown` 和 motif 检查结果写入 memory。
+1. 先统一 GFP 参考坐标，只保留一套 canonical contract；
+2. 把 `protein_score.py` 从启发式比例打分改成 `mean_pLDDT + pTM + SYG约束`；
+3. 把 `bridge.py` 的结构输出变成稳定 schema；
+4. 把 `score_breakdown` 和 motif 检查结果写入 memory。
 
 ### 紧接着做
 
-4. 离线整理 `Sarkisyan 2016` 数据；
-5. 用 ESM3 embedding 训一个 XGBoost surrogate baseline；
-6. 让线上支持 `hybrid score`。
+5. 把 `gfp` 字符串判断抽成 `TargetProfile`；
+6. 离线整理 `Sarkisyan 2016` 数据；
+7. 用 ESM3 embedding 训一个 XGBoost surrogate baseline；
+8. 让线上支持 `hybrid score`。
 
 ### 最后做
 
-7. 加 ensemble uncertainty；
-8. 加实验导入接口；
-9. 再考虑 BoTorch 和更复杂的采集函数。
+9. 把 surrogate 输出改成 assay-agnostic schema；
+10. 加 ensemble uncertainty；
+11. 加实验导入接口；
+12. 再考虑 BoTorch 和更复杂的采集函数。
 
 一句话总结：**先把当前启发式 score 升级成结构代理，再用 GFP 公共数据把它升级成实验驱动 surrogate，最后再闭环主动学习。** 这是最稳、最科学、也最符合你当前仓库状态的路线。

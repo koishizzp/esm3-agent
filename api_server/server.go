@@ -456,6 +456,9 @@ func isReasoningQuery(content string) bool {
 	if text == "" {
 		return false
 	}
+	if strings.Contains(text, "自动设计") || strings.Contains(text, "设计") || strings.Contains(text, "生成") || strings.Contains(text, "优化") || strings.Contains(text, "迭代") || strings.Contains(text, "design") || strings.Contains(text, "generate") || strings.Contains(text, "optimize") {
+		return false
+	}
 	reasoningKeywords := []string{"鐟欙綁鍣?, "閸掑棙鐎?, "娑撹桨绮堟稊?, "娑撹桨缍?, "閻炲棛鏁?, "娓氭繃宓?, "閹簼绠為惇?, "鐠囧嫪鐜?, "閹崵绮?, "濮掑倹瀚?, "鐎佃鐦?, "濮ｆ棁绶?, "闁倸鎮庢宀冪槈", "閺囨挳鈧倸鎮?, "娴兼ê鍘涙宀冪槈", "妞嬪酣娅?, "娑撳绔村?, "閸婃瑩鈧?, "explain", "why", "compare"}
 	actionKeywords := []string{"閼奉亜濮╃拋鎹愵吀", "鐠佹崘顓?, "閻㈢喐鍨?, "娴兼ê瀵?, "鏉╊厺鍞?, "缂佈呯敾娴兼ê瀵?, "缂佈呯敾鐠?, "闁插秵鏌?, "閸愬秵娼?, "缁涙盯鈧?, "閹垫挸鍨?, "缁愪礁褰?, "闁棙濮岄崣?, "design", "generate", "optimize"}
 	if !containsAny(text, reasoningKeywords) {
@@ -464,7 +467,10 @@ func isReasoningQuery(content string) bool {
 	if containsAny(text, []string{"瑜版挸澧?, "鏉╂瑤閲?, "鐠?, "娑撳﹣绔存潪?, "閸婃瑩鈧?, "閺堚偓娴ｅ啿绨崚?, "缂佹挻鐏?, "current", "candidate", "result"}) {
 		return true
 	}
-	return !containsAny(text, actionKeywords)
+	if containsAny(text, actionKeywords) {
+		return false
+	}
+	return true
 }
 
 func looksLikeWhyQuestion(content string) bool {
@@ -586,8 +592,8 @@ func inferDesignRequest(content string) protein_pipeline.DesignRequest {
 	if strings.Contains(content, "缂佹稒鐩埀?) {
 		designReq.NumCandidates = 12
 	}
-	if strings.Contains(content, "gsg") {
-		designReq.RequiredMotif = "GSG"
+	if strings.Contains(content, "syg") || strings.Contains(content, "chromophore") || strings.Contains(content, "鑹插洟") {
+		designReq.RequiredMotif = "SYG"
 	}
 	if strings.Contains(content, "濞戞挸绉烽崗?) && strings.Contains(content, "c") {
 		designReq.ForbiddenAAs = "C"

@@ -138,7 +138,7 @@
     <div id="chatWindow" class="chat-window" aria-live="polite"></div>
 
     <div class="controls">
-      <textarea id="prompt" placeholder="例如：请自动设计 GFP 变体并迭代优化，尽量保留 GSG motif，避免 C。"></textarea>
+      <textarea id="prompt" placeholder="例如：请自动设计 GFP 变体并迭代优化，强制保留 SYG 色团位点，并继续围绕当前参考序列局部优化。"></textarea>
       <div style="display:flex; flex-direction:column; gap:.5rem;">
         <button id="sendBtn">发送</button>
         <button id="clearBtn" class="secondary">清空会话</button>
@@ -147,7 +147,7 @@
 
     <div class="quick-actions">
       <button class="secondary" data-q="请自动设计 GFP 并迭代优化">示例：自动迭代</button>
-      <button class="secondary" data-q="请做更严格筛选，并加入 GSG motif">示例：筛选 + motif</button>
+      <button class="secondary" data-q="请做更严格筛选，并强制保留 SYG 色团位点">示例：筛选 + SYG</button>
       <button class="secondary" data-q="请帮助我理解你返回的候选分数">示例：解释结果</button>
     </div>
 
@@ -237,8 +237,10 @@
       const reasoningPattern = /(解释|分析|为什么|为何|理由|依据|怎么看|评价|总结|概括|对比|比较|是否值得|适合验证|更适合|优先验证|风险|下一步|候选|explain|why|compare)/i;
       const actionPattern = /(自动设计|设计|生成|优化|迭代|继续优化|继续跑|重新|再来|筛选|打分|突变|design|generate|optimize)/i;
       if (!reasoningPattern.test(text)) return false;
+      if (actionPattern.test(text)) return false;
+      if (!latestFullResult) return false;
       if (/(当前|这个|该|上一轮|候选|最佳序列|结果|current|candidate|result)/i.test(text)) return true;
-      return !actionPattern.test(text);
+      return true;
     }
 
     async function fetchFullDesignResult(lastUserContent) {
@@ -316,16 +318,26 @@
       setBusy(true);
       try {
         const reasoning = isReasoningQuery(content);
-        const resp = await fetch('/chat_reasoning', {
+        const endpoint = reasoning ? '/chat_reasoning' : '/v1/chat/completions';
+        const requestBody = reasoning
+          ? {
+              message: content,
+              conversation: conversation.slice(0, -1),
+              latest_result: latestFullResult,
+              previous_best_sequence: previousBestSequence || null,
+              current_mode: 'design',
+            }
+          : {
+              model: 'esm3-protein-design-agent',
+              messages: conversation.map((item) => ({ role: item.role, content: item.content })),
+              latest_result: latestFullResult,
+              previous_best_sequence: previousBestSequence || null,
+              reasoning_context: latestReasoningContext,
+            };
+        const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: content,
-            conversation: conversation.slice(0, -1),
-            latest_result: latestFullResult,
-            previous_best_sequence: previousBestSequence || null,
-            current_mode: 'design',
-          })
+          body: JSON.stringify(requestBody)
         });
 
         if (!resp.ok) {
@@ -366,7 +378,7 @@
     clearBtn.addEventListener('click', () => {
       conversation.splice(0, conversation.length, {
         role: 'assistant',
-        content: '会话已清空。请告诉我你的设计目标，例如：设计 GFP、加入 GSG motif、禁用 C 并迭代 5 轮。'
+        content: '会话已清空。请告诉我你的设计目标，例如：设计 GFP、强制保留 SYG 色团位点，并迭代 5 轮。'
       });
       renderConversation();
       renderMeta(null);

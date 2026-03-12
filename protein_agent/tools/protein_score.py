@@ -112,6 +112,14 @@ class ProteinScoreTool(Tool):
         reference_length = 0
         chromophore_start = 0
         chromophore_motif = ""
+        fixed_residues = [
+            {
+                "position": int(item.get("position") or 0),
+                "residue": str(item.get("residue") or "").strip().upper(),
+            }
+            for item in (context.get("fixed_residues") or [])
+            if isinstance(item, dict)
+        ]
         if use_gfp_constraints:
             require_gfp_chromophore = _to_bool(
                 context.get("require_gfp_chromophore"),
@@ -130,13 +138,13 @@ class ProteinScoreTool(Tool):
                 .strip()
                 .upper()
             ) or "SYG"
-
         return {
             "use_gfp_constraints": use_gfp_constraints,
             "require_gfp_chromophore": require_gfp_chromophore,
             "reference_length": reference_length,
             "chromophore_start": chromophore_start,
             "chromophore_motif": chromophore_motif,
+            "fixed_residues": fixed_residues,
         }
 
     def _extract_structure_metrics(self, structure: dict[str, Any]) -> dict[str, Any]:
@@ -223,8 +231,27 @@ class ProteinScoreTool(Tool):
         observed_motif = None
         motif_intact = None
         motif_penalty = 0.0
+        fixed_residue_penalty = 0.0
+        fixed_residue_violations: list[dict[str, Any]] = []
         length_penalty = 0.0
         valid_candidate = True
+        for item in scoring_profile["fixed_residues"]:
+            position = int(item.get("position") or 0)
+            residue = str(item.get("residue") or "").strip().upper()
+            if position < 1 or not residue:
+                continue
+            observed = sequence[position - 1] if position <= len(sequence) else ""
+            if observed != residue:
+                fixed_residue_violations.append(
+                    {
+                        "position": position,
+                        "expected": residue,
+                        "observed": observed,
+                    }
+                )
+        if fixed_residue_violations:
+            fixed_residue_penalty = HARD_CONSTRAINT_PENALTY
+            valid_candidate = False
         if use_gfp_constraints:
             motif_start = int(scoring_profile["chromophore_start"])
             required_motif = str(scoring_profile["chromophore_motif"])
@@ -239,9 +266,12 @@ class ProteinScoreTool(Tool):
                 motif_penalty = HARD_CONSTRAINT_PENALTY
             if reference_length and length_delta:
                 length_penalty = min(0.50, length_delta / 10.0)
-            valid_candidate = not scoring_profile["require_gfp_chromophore"] or bool(motif_intact)
+            valid_candidate = (
+                (not scoring_profile["require_gfp_chromophore"] or bool(motif_intact))
+                and not fixed_residue_violations
+            )
 
-        score = structure_score - motif_penalty - length_penalty
+        score = structure_score - motif_penalty - fixed_residue_penalty - length_penalty
         score_backend = f"structure:{'gfp' if use_gfp_constraints else 'generic'}_structure_proxy"
 
         score_breakdown = {
@@ -252,6 +282,7 @@ class ProteinScoreTool(Tool):
             "ptm_component_source": ptm_component_source,
             "structure_score": round(structure_score, 6),
             "motif_penalty": round(motif_penalty, 6),
+            "fixed_residue_penalty": round(fixed_residue_penalty, 6),
             "length_penalty": round(length_penalty, 6),
             "final_score": round(score, 6),
         }
@@ -267,6 +298,9 @@ class ProteinScoreTool(Tool):
                 "required_motif": required_motif,
                 "observed_motif": observed_motif,
                 "motif_intact": motif_intact,
+                "fixed_residues": scoring_profile["fixed_residues"],
+                "fixed_residue_violations": fixed_residue_violations,
+                "fixed_residue_penalty": round(fixed_residue_penalty, 6),
                 "mean_plddt": _round_metric(mean_plddt),
                 "mean_plddt_source": structure_metrics["mean_plddt_source"],
                 "ptm": _round_metric(ptm),

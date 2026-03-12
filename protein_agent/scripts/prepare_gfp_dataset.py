@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for cleaned dataset artifacts",
     )
     parser.add_argument("--reference-name", default="avGFP")
-    parser.add_argument("--chromophore-start", type=int, default=65)
+    parser.add_argument("--chromophore-start", type=int, default=63)
     parser.add_argument("--chromophore-motif", default="SYG")
     parser.add_argument("--random-seed", type=int, default=7)
     parser.add_argument("--train-max-mutations", type=int, default=3)

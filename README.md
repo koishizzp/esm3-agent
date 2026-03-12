@@ -11,6 +11,25 @@
 - **可追踪实验记忆**
 - **可通过 REST API 直接集成**
 
+## 文档入口
+
+当前建议优先阅读下面这些文档：
+
+- `README.md`
+  - 安装、运行、API、真实 ESM3 接入总览
+- `GFP_SURROGATE_UPGRADE_PLAN.md`
+  - GFP surrogate / active learning 的架构路线图
+- `GFP_HARD_CONSTRAINTS_USAGE.md`
+  - GFP 硬约束和 `fixed_residues` 用法
+- `PHASE2_GFP_SURROGATE_GUIDE.md`
+  - GFP Phase 2 的稳定操作指南
+- `PHASE3_ACTIVE_LEARNING_GUIDE.md`
+  - GFP Phase 3 / active learning 的稳定操作指南
+- `ESM3_DEMO_GUIDE.md`
+  - 统一后的演示手册
+
+历史性的 rerun、recovery、closeout、tutorial、demo 快照文档已经合并进以上主文档，不再建议继续维护。
+
 ---
 
 ## 1. 仓库结构（已实现）

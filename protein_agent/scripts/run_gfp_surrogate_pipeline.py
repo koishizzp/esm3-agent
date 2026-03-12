@@ -19,6 +19,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-name", default="xgb_ensemble_v1")
     parser.add_argument("--ensemble-size", type=int, default=5)
     parser.add_argument("--split-column", default="split_mutation_count", choices=["split_random", "split_mutation_count"])
+    parser.add_argument("--chromophore-start", type=int, default=63)
+    parser.add_argument("--chromophore-motif", default="SYG")
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     parser.add_argument("--pooling", default="mean", choices=["mean", "bos"])
     parser.add_argument("--half", action="store_true")
@@ -100,6 +102,10 @@ def main() -> None:
             args.raw_input,
             "--reference-fasta",
             args.reference_fasta,
+            "--chromophore-start",
+            str(args.chromophore_start),
+            "--chromophore-motif",
+            args.chromophore_motif,
             "--output-dir",
             str(processed_dir),
         ],
@@ -140,6 +146,10 @@ def main() -> None:
             str(model_dir),
             "--reference-fasta",
             args.reference_fasta,
+            "--chromophore-start",
+            str(args.chromophore_start),
+            "--chromophore-motif",
+            args.chromophore_motif,
             "--split-column",
             args.split_column,
             "--model-type",

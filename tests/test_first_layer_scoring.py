@@ -110,6 +110,44 @@ class FirstLayerScoringTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["ptm_component_source"], "confidence_fallback")
         self.assertGreater(result["score"], 0.0)
 
+    def test_fixed_residue_violation_is_penalized_and_filtered(self) -> None:
+        structure = {
+            "mean_plddt": 86.0,
+            "ptm": 0.75,
+            "confidence": 0.86,
+        }
+        fixed_position = 96
+        intact = self.tool.execute(
+            {
+                "sequence": GFP_SCAFFOLD,
+                "structure": structure,
+                "scoring_context": {
+                    **self.scoring_context,
+                    "fixed_residues": [{"position": fixed_position, "residue": GFP_SCAFFOLD[fixed_position - 1]}],
+                },
+            }
+        )
+        broken_sequence = GFP_SCAFFOLD[: fixed_position - 1] + "A" + GFP_SCAFFOLD[fixed_position:]
+        broken = self.tool.execute(
+            {
+                "sequence": broken_sequence,
+                "structure": structure,
+                "scoring_context": {
+                    **self.scoring_context,
+                    "fixed_residues": [{"position": fixed_position, "residue": GFP_SCAFFOLD[fixed_position - 1]}],
+                },
+            }
+        )
+
+        self.assertTrue(intact["valid_candidate"])
+        self.assertFalse(broken["valid_candidate"])
+        self.assertEqual(
+            broken["score"],
+            round(intact["score"] - HARD_CONSTRAINT_PENALTY, 6),
+        )
+        self.assertEqual(broken["metrics"]["fixed_residue_penalty"], HARD_CONSTRAINT_PENALTY)
+        self.assertEqual(broken["metrics"]["fixed_residue_violations"][0]["position"], fixed_position)
+
     def test_bridge_keeps_schema_stable_when_ptm_is_missing(self) -> None:
         normalized = normalize_structure(
             {
@@ -147,6 +185,40 @@ class FirstLayerScoringTests(unittest.TestCase):
         self.assertEqual(metadata["ptm"], 0.72)
         self.assertTrue(metadata["motif_intact"])
         self.assertEqual(metadata["score_version"], "structure_proxy_v3")
+
+    def test_workflow_projects_sequences_to_hard_constraints_before_scoring(self) -> None:
+        engine = ExperimentLoopEngine(DummyExecutor(), ExperimentMemory())
+        broken = GFP_SCAFFOLD[:62] + "AAA" + GFP_SCAFFOLD[65:95] + "A" + GFP_SCAFFOLD[96:]
+        result = engine.run(
+            plan={
+                "workflow": "gfp_optimizer",
+                "target": "GFP",
+                "max_iterations": 1,
+                "patience": 1,
+                "candidates_per_round": 1,
+            },
+            task="optimize gfp brightness",
+            seed_prompt=GFP_SCAFFOLD,
+            initial_sequences=[broken],
+            multimodal_context={
+                "sequence_constraints": {
+                    "reference_length": len(GFP_SCAFFOLD),
+                    "fixed_residues": [
+                        {"position": 63, "residue": "S"},
+                        {"position": 64, "residue": "Y"},
+                        {"position": 65, "residue": "G"},
+                        {"position": 96, "residue": GFP_SCAFFOLD[95]},
+                    ],
+                }
+            },
+        )
+
+        self.assertEqual(len(result["records"]), 1)
+        record = result["records"][0]
+        self.assertEqual(record["sequence"][62:65], "SYG")
+        self.assertEqual(record["sequence"][95], GFP_SCAFFOLD[95])
+        self.assertTrue(record["metadata"]["motif_intact"])
+        self.assertEqual(record["metadata"]["fixed_residue_violations"], [])
 
 
 if __name__ == "__main__":
