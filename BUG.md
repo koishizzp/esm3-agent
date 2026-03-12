@@ -1,0 +1,81 @@
+# ==============================
+# 1. Agent 鏉╃偞甯撮弬鐟扮础
+# ==============================
+# 閹恒劏宕橀敍姘帥閸氼垰濮╅張顒€婀寸敮鎼佲敆 ESM3 閺堝秴濮熼敍灞藉晙鐠?Agent 闁俺绻?HTTP 鏉╃偞甯寸€瑰啨鈧?PROTEIN_AGENT_ESM3_BACKEND=http
+PROTEIN_AGENT_ESM3_SERVER_URL=http://127.0.0.1:8001
+
+
+# ==============================
+# 2. 閺堫剙婀?ESM3 闁劎璁茬捄顖氱窞
+# ==============================
+PROTEIN_AGENT_ESM3_PYTHON_PATH=/mnt/disk3/tio_nekton4/miniconda3/envs/esm3_env/bin/python
+PROTEIN_AGENT_ESM3_ROOT=/mnt/disk3/tio_nekton4/esm3
+PROTEIN_AGENT_ESM3_PROJECT_DIR=/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction
+PROTEIN_AGENT_ESM3_WEIGHTS_DIR=/mnt/disk3/tio_nekton4/esm3/weights
+PROTEIN_AGENT_ESM3_DATA_DIR=/mnt/disk3/tio_nekton4/esm3/data
+
+
+# ==============================
+# 3. 濡€崇€锋稉搴ゎ啎婢?# ==============================
+PROTEIN_AGENT_ESM3_MODEL_NAME=esm3_sm_open_v1
+PROTEIN_AGENT_ESM3_DEVICE=cuda
+PROTEIN_AGENT_REQUEST_TIMEOUT=300
+
+
+# ==============================
+# 3.1 閸欘垶鈧绱伴張宥呭閻╂垵鎯夋稉搴ょ箥缂佹潙寮弫?# ==============================
+# 閺堫剙婀寸敮鎼佲敆 ESM3 閺堝秴濮熼惄鎴濇儔閸︽澘娼?# PROTEIN_AGENT_ESM3_SERVER_HOST=0.0.0.0
+# PROTEIN_AGENT_ESM3_SERVER_PORT=8001
+
+# Agent API 閻╂垵鎯夐崷鏉挎絻
+# PROTEIN_AGENT_API_HOST=0.0.0.0
+# PROTEIN_AGENT_API_PORT=8000
+
+# 娑撯偓闁款喖鎯庨崝?/ 閸嬫粍顒涢懘姘拱娴ｈ法鏁ら惃鍕）韫囨ぜ鈧赋ID閵嗕胶鐡戝鍛扮Т閺冩儼顔曠純?# PROTEIN_AGENT_ESM3_SERVER_LOG=logs/esm3_server.log
+# PROTEIN_AGENT_API_LOG=logs/protein_agent.log
+# PROTEIN_AGENT_ESM3_SERVER_PID_FILE=logs/esm3_server.pid
+# PROTEIN_AGENT_API_PID_FILE=logs/protein_agent.pid
+# PROTEIN_AGENT_START_WAIT_TIMEOUT=180
+# PROTEIN_AGENT_STOP_WAIT_TIMEOUT=20
+
+
+# ==============================
+# 4. 閸欘垶鈧绱伴弰鎯х础閹稿洤鐣炬い鍦窗閸忋儱褰?# ==============================
+# 婵″倹鐏夋担鐘叉倵缂侇厾鈥樼拋銈勭啊妞ゅ湱娲伴柌灞芥憿娴滄稑鍤遍弫鏉垮讲閻╁瓨甯撮悽銊ょ艾閻㈢喐鍨?/ 缁愪礁褰?/ 缂佹挻鐎０鍕ゴ閿?# 閸欘垯浜掗幎濠傜暊娴狀剙锝為崷銊ょ瑓闂堫澁绱辨稉宥咃綖閺冨墎閮寸紒鐔剁窗閼奉亜濮╃亸婵婄槸閹恒垺绁撮妴?# 閺€顖涘瘮娑撱倗顫掗弽鐓庣础閿?# - Python 濡€虫健鐠侯垰绶?閸戣姤鏆熼崥?# - 閼存碍婀扮紒婵嗩嚠鐠侯垰绶?py:閸戣姤鏆熼崥?# PROTEIN_AGENT_ESM3_GENERATE_ENTRYPOINT=
+# PROTEIN_AGENT_ESM3_MUTATE_ENTRYPOINT=
+# PROTEIN_AGENT_ESM3_STRUCTURE_ENTRYPOINT=
+# PROTEIN_AGENT_ESM3_INVERSE_FOLD_ENTRYPOINT=
+# PROTEIN_AGENT_ESM3_FUNCTION_GENERATE_ENTRYPOINT=
+
+
+# ==============================
+# 5. 閸欘垶鈧绱癓LM 閻㈢喐鍨氭稉瀛樻 Python 閸忔粌绨?# ==============================
+# 閸欘亝婀佽ぐ鎾存拱閸︿即銆嶉惄顔界梾閺堝菙鐎规艾鍙嗛崣锝冣偓浣风瑬娴ｇ姴鍘戠拋?Agent 閻㈢喐鍨氭稉瀛樻 Python 鏉堝懎濮懘姘拱閺冭绱?# 閹靛秵澧﹀鈧潻娆庨嚋瀵偓閸忕偨鈧?PROTEIN_AGENT_ALLOW_GENERATED_PYTHON=false
+
+
+# ==============================
+# 6. 閸欘垶鈧绱癓LM 鐟欏嫬鍨?/ 娴狅絿鐖滈悽鐔稿灇閸氬海顏?# ==============================
+# 婵″倹鐏夋担鐘茬瑖閺堟冻绱?# - 鐠?LLM 閺囧瓨娅ら懗钘夋勾閻炲棜袙娴犺濮?# - 閹存牞鈧懎婀箛鍛邦洣閺冨墎鏁撻幋鎰閺?Python 娴狅絿鐖?# 鐏忓崬锝炴稉瀣桨鏉╂瑤绨洪崣鍌涙殶閵?# PROTEIN_AGENT_OPENAI_API_KEY=
+# PROTEIN_AGENT_OPENAI_BASE_URL=
+# PROTEIN_AGENT_LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-3yCBbn8CdJ8HmhqzHcCgtSfroxr1OnzTeRQ7iW60vOE7kAwi
+OPENAI_BASE_URL=https://ai.xingyungept.cn/v1
+OPENAI_MODEL=gpt-5.2
+PROTEIN_AGENT_LLM_MODEL=gpt-5.2
+PROTEIN_AGENT_OPENAI_BASE_URL=https://ai.xingyungept.cn/v1
+PROTEIN_AGENT_OPENAI_API_KEY=sk-3yCBbn8CdJ8HmhqzHcCgtSfroxr1OnzTeRQ7iW60vOE7kAwi
+
+
+# ==============================
+# 7. Phase 2 closeout / surrogate online scoring
+# ==============================
+PROTEIN_AGENT_SCORING_BACKEND=hybrid
+PROTEIN_AGENT_SURROGATE_MODEL_PATH=/mnt/disk3/tio_nekton4/esm3/projects/gfp_reproduction/esm3-agent/models/gfp_surrogate/xgb_ensemble_active_v002
+PROTEIN_AGENT_SURROGATE_MODEL_TYPE=xgboost
+PROTEIN_AGENT_SURROGATE_ENSEMBLE_SIZE=5
+PROTEIN_AGENT_SURROGATE_FEATURE_BACKEND=hybrid
+PROTEIN_AGENT_SURROGATE_USE_STRUCTURE_FEATURES=false
+PROTEIN_AGENT_REQUIRE_GFP_CHROMOPHORE=true
+PROTEIN_AGENT_GFP_REFERENCE_LENGTH=236
+PROTEIN_AGENT_GFP_CHROMOPHORE_START=63
+PROTEIN_AGENT_GFP_CHROMOPHORE_MOTIF=SYG

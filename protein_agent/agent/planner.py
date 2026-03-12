@@ -51,17 +51,21 @@ class LLMPlanner:
             },
         }
 
-        response = self.client.responses.create(
-            model=self.settings.llm_model,
-            input=[
-                {
-                    "role": "system",
-                    "content": "You are a protein engineering planner. Output valid JSON only.",
-                },
-                {"role": "user", "content": json.dumps(prompt)},
-            ],
-        )
-        text = response.output_text.strip()
+        try:
+            response = self.client.responses.create(
+                model=self.settings.llm_model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": "You are a protein engineering planner. Output valid JSON only.",
+                    },
+                    {"role": "user", "content": json.dumps(prompt)},
+                ],
+            )
+            text = response.output_text.strip()
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("LLM planner request failed; using deterministic fallback planner.")
+            return self._fallback_plan(task)
         try:
             return json.loads(text)
         except json.JSONDecodeError:
