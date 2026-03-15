@@ -53,35 +53,135 @@ check_pid() {
   return 1
 }
 
+listening_pids_on_port() {
+  local port="$1"
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk '!seen[$0]++'
+    return 0
+  fi
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp 2>/dev/null | awk -v port="$port" '
+      $1 == "LISTEN" && index($4, ":" port) {
+        if (match($0, /pid=[0-9]+/)) {
+          pid = substr($0, RSTART + 4, RLENGTH - 4)
+          if (!seen[pid]++) {
+            print pid
+          }
+        }
+      }
+    '
+    return 0
+  fi
+
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -ltnp 2>/dev/null | awk -v port="$port" '
+      index($4, ":" port) {
+        split($7, parts, "/")
+        pid = parts[1]
+        if (pid ~ /^[0-9]+$/ && !seen[pid]++) {
+          print pid
+        }
+      }
+    '
+  fi
+}
+
+describe_pid() {
+  local pid="$1"
+  local cmd=""
+
+  if command -v ps >/dev/null 2>&1; then
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null | sed 's/^[[:space:]]*//')"
+  fi
+
+  if [[ -z "$cmd" ]] && [[ -r "/proc/$pid/cmdline" ]]; then
+    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/[[:space:]]*$//')"
+  fi
+
+  printf '%s' "$cmd"
+}
+
+print_port_owners() {
+  local port="$1"
+  local pid=""
+  local cmd=""
+
+  while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    cmd="$(describe_pid "$pid")"
+    if [[ -n "$cmd" ]]; then
+      echo "  - PID $pid: $cmd"
+    else
+      echo "  - PID $pid"
+    fi
+  done < <(listening_pids_on_port "$port")
+}
+
+pid_owns_port() {
+  local pid="$1"
+  local port="$2"
+  local owner=""
+
+  while read -r owner; do
+    [[ -n "$owner" ]] || continue
+    if [[ "$owner" == "$pid" ]]; then
+      return 0
+    fi
+  done < <(listening_pids_on_port "$port")
+
+  return 1
+}
+
 print_service_status() {
   local name="$1"
   local url="$2"
   local pid_file="$3"
   local log_file="$4"
+  local port="$5"
+  local owners=""
 
   echo "=============================="
   echo "$name"
   echo "- URL: $url"
-  echo "- PID 文件: $pid_file"
-  echo "- 日志文件: $log_file"
+  echo "- PID file: $pid_file"
+  echo "- Log file: $log_file"
 
   local pid=""
   if pid="$(check_pid "$pid_file")"; then
-    echo "- 进程状态: 运行中 (PID: $pid)"
+    echo "- Process: running (PID: $pid)"
   else
-    echo "- 进程状态: 未发现有效 PID"
+    echo "- Process: no active PID from the managed pid file"
   fi
 
   local body=""
   if body="$(health_body "$url" 2>/dev/null)"; then
-    echo "- 健康检查: 正常"
-    echo "- 健康响应: $body"
+    owners="$(print_port_owners "$port")"
+    if [[ -n "$pid" ]] && ! pid_owns_port "$pid" "$port"; then
+      echo "- Port owner: mismatch"
+      echo "- Expected PID $pid, but port $port is owned by:"
+      echo "$owners"
+      return 1
+    fi
+    if [[ -z "$pid" ]] && [[ -n "$owners" ]]; then
+      echo "- Port owner: unmanaged process"
+      echo "$owners"
+      return 1
+    fi
+    echo "- Health: ok"
+    echo "- Health body: $body"
     return 0
   fi
 
-  echo "- 健康检查: 失败"
+  echo "- Health: failed"
+  owners="$(print_port_owners "$port")"
+  if [[ -n "$owners" ]]; then
+    echo "- Port listener:"
+    echo "$owners"
+  fi
   if [[ -f "$log_file" ]]; then
-    echo "- 最近日志:"
+    echo "- Recent log lines:"
     tail -n 5 "$log_file" || true
   fi
   return 1
@@ -89,13 +189,13 @@ print_service_status() {
 
 ALL_OK=0
 
-if print_service_status "ESM3 常驻服务" "http://${SERVER_HOST}:${SERVER_PORT}/health" "$ESM3_PID_FILE" "$ESM3_LOG"; then
+if print_service_status "ESM3 service" "http://${SERVER_HOST}:${SERVER_PORT}/health" "$ESM3_PID_FILE" "$ESM3_LOG" "$SERVER_PORT"; then
   :
 else
   ALL_OK=1
 fi
 
-if print_service_status "Protein Agent API" "http://${API_HOST}:${API_PORT}/health" "$AGENT_PID_FILE" "$AGENT_LOG"; then
+if print_service_status "Protein Agent API" "http://${API_HOST}:${API_PORT}/health" "$AGENT_PID_FILE" "$AGENT_LOG" "$API_PORT"; then
   :
 else
   ALL_OK=1
@@ -103,9 +203,9 @@ fi
 
 echo "=============================="
 if [[ "$ALL_OK" -eq 0 ]]; then
-  echo "总结：两个服务都正常。"
+  echo "Summary: both managed services are healthy."
 else
-  echo "总结：至少有一个服务异常，请结合上面的日志继续排查。"
+  echo "Summary: at least one managed service is unhealthy or port ownership does not match."
 fi
 
 exit "$ALL_OK"
