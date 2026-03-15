@@ -65,7 +65,20 @@ class ExperimentLoopEngine:
         seed_prompt: str | None,
         sequence_constraints: SequenceConstraints | None,
     ) -> str | None:
-        value = self._normalize_sequence(seed_prompt or "", sequence_constraints)
+        raw_value = (seed_prompt or "").strip().upper()
+        value = self._normalize_sequence(raw_value, sequence_constraints)
+        if not value or len(value) < 20:
+            # Historical GFP scaffolds in this repo include a 238 aa full-length
+            # sequence ("MS" leader) while the active hard-constraint profile uses
+            # the mature 236 aa avGFP coordinate system. When that profile is active,
+            # trim the full-length prefix so the seed can still bootstrap a run.
+            if (
+                sequence_constraints is not None
+                and sequence_constraints.reference_length
+                and len(raw_value) == sequence_constraints.reference_length + 2
+                and raw_value.startswith("MS")
+            ):
+                value = self._normalize_sequence(raw_value[2:], sequence_constraints)
         if not value or len(value) < 20:
             return None
         if set(value) - AA_ALPHABET:

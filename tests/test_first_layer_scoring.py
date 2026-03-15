@@ -247,6 +247,37 @@ class FirstLayerScoringTests(unittest.TestCase):
         self.assertEqual(result["records"][0]["sequence"], GFP_SCAFFOLD)
         self.assertEqual(result["records"][0]["mutation_history"], ["seed_prompt_baseline"])
 
+    def test_workflow_trims_full_length_gfp_seed_to_match_mature_reference_constraints(self) -> None:
+        engine = ExperimentLoopEngine(EmptyGenerationExecutor(), ExperimentMemory())
+        result = engine.run(
+            plan={
+                "workflow": "gfp_optimizer",
+                "target": "GFP",
+                "max_iterations": 1,
+                "patience": 1,
+                "candidates_per_round": 1,
+            },
+            task="optimize gfp brightness",
+            seed_prompt=GFP_SCAFFOLD,
+            initial_sequences=None,
+            multimodal_context={
+                "sequence_constraints": {
+                    "reference_length": len(GFP_SCAFFOLD) - 2,
+                    "fixed_residues": [
+                        {"position": 63, "residue": "S"},
+                        {"position": 64, "residue": "Y"},
+                        {"position": 65, "residue": "G"},
+                    ],
+                }
+            },
+        )
+
+        self.assertEqual(len(result["records"]), 1)
+        self.assertEqual(len(result["records"][0]["sequence"]), len(GFP_SCAFFOLD) - 2)
+        self.assertEqual(result["records"][0]["sequence"][:5], "KGEEL")
+        self.assertEqual(result["records"][0]["sequence"][62:65], "SYG")
+        self.assertEqual(result["records"][0]["mutation_history"], ["seed_prompt_baseline"])
+
     def test_workflow_raises_clear_error_when_no_initial_population_can_be_built(self) -> None:
         engine = ExperimentLoopEngine(EmptyGenerationExecutor(), ExperimentMemory())
 

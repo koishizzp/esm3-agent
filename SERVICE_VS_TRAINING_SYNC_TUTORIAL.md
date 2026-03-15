@@ -1,5 +1,11 @@
 # 服务层仓库 / 训练层仓库 同步教程
 
+Port note:
+
+- `8001` = ESM3 runtime
+- `8000` = canonical Python Agent API
+- `8080` = local forwarded alias or optional gateway only
+
 这份教程专门回答你现在这个问题：
 
 > 服务器上有两个仓库，一个负责在线服务，一个负责训练模型。  

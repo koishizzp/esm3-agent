@@ -32,6 +32,22 @@
 
 ---
 
+## Port Convention
+
+Canonical ports in this repo:
+
+| Port | Service | Status |
+| --- | --- | --- |
+| `8001` | local ESM3 runtime (`protein_agent.esm3_server`) | required |
+| `8000` | main Python Agent API (`protein_agent.api.main`) | required |
+| `8080` | optional Go gateway or local SSH-forward alias to `8000` | optional |
+
+Rules:
+
+- Treat `8000` as the only canonical Agent API port in docs, scripts, and examples.
+- Use `8080` only when you are deliberately exposing the optional Go gateway, or when your local machine forwards remote `8000` to local `8080`.
+- Do not describe `8080` as a second canonical Agent API port.
+
 ## 1. 仓库结构（已实现）
 
 ```text
@@ -538,7 +554,7 @@ http://127.0.0.1:8080/docs
 至少满足下面三层检查：
 
 1. **旧服务检查不是关键**
-   - `curl http://127.0.0.1:8080/health`
+   - `curl http://127.0.0.1:8080/health` if you explicitly run the optional gateway or forward remote `8000` to local `8080`
    - 这只能说明旧服务活着，不代表真实 ESM3 已经接上。
 
 2. **常驻 ESM3 服务必须正常**

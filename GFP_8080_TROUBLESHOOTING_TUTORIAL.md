@@ -1,5 +1,11 @@
 # GFP 设计与 8080 页面排错教程
 
+Port note:
+
+- `8001` = ESM3 runtime
+- `8000` = canonical Python Agent API
+- `8080` = local forwarded alias to `8000`, or an optional gateway only
+
 这份教程专门解决你刚刚遇到的两类问题：
 
 1. `500 - auth_unavailable: no auth available`

@@ -1,5 +1,11 @@
 # ESM3 Demo Guide
 
+Port note:
+
+- `8001` = ESM3 runtime
+- `8000` = canonical Python Agent API/UI
+- `8080` = local demo alias for forwarded `8000`, or an optional gateway only
+
 这份文档是当前仓库里 **唯一建议继续保留的演示文档**。它合并了组会演示稿和 `8080` 工作台演示手册，保留一套统一的现场流程。
 
 ## 1. 演示目标
@@ -71,7 +77,7 @@ ssh -o ExitOnForwardFailure=yes -N -L 8080:127.0.0.1:8000 -L 8081:127.0.0.1:8001
 
 你可以直接说：
 
-> `8080` 是 Agent 层，`8081` 是底层 ESM3 runtime；当前演示的不是 mock，而是真实链路。
+> `8080` is only the local demo alias for remote `8000`; `8081` maps to remote `8001` ESM3 runtime. The demo still exercises the real chain, not a mock.
 
 ## 5. 步骤 1：Iterative Design
 
