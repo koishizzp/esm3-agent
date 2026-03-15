@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from protein_agent.agent.executor import ToolExecutor
-from protein_agent.constraints import SequenceConstraints
+from protein_agent.constraints import AA_ALPHABET, SequenceConstraints
 from protein_agent.memory.experiment_memory import ExperimentMemory, ExperimentRecord
 
 LOGGER = logging.getLogger(__name__)
@@ -60,6 +60,18 @@ class ExperimentLoopEngine:
             return value
         return sequence_constraints.apply(value)
 
+    def _normalize_seed_sequence(
+        self,
+        seed_prompt: str | None,
+        sequence_constraints: SequenceConstraints | None,
+    ) -> str | None:
+        value = self._normalize_sequence(seed_prompt or "", sequence_constraints)
+        if not value or len(value) < 20:
+            return None
+        if set(value) - AA_ALPHABET:
+            return None
+        return value
+
     def _selection_pool(self, records: list[ExperimentRecord]) -> list[ExperimentRecord]:
         valid_records = [
             record
@@ -98,6 +110,11 @@ class ExperimentLoopEngine:
             population_size=population_size,
             sequence_constraints=sequence_constraints,
         )
+        if not population:
+            raise RuntimeError(
+                "No candidate sequences were available for evaluation after initialization. "
+                "Check the ESM3 generator output and sequence constraints."
+            )
 
         for iteration in range(1, max_iterations + 1):
             LOGGER.info("Iteration %s started", iteration)
@@ -123,6 +140,11 @@ class ExperimentLoopEngine:
 
             selection_pool = self._selection_pool(evaluated)
             ranked = sorted(selection_pool, key=lambda r: r.score, reverse=True)
+            if not ranked:
+                raise RuntimeError(
+                    f"No candidate sequences were available for evaluation in iteration {iteration}. "
+                    "Check the ESM3 generator output and sequence constraints."
+                )
             top = ranked[:elite_size]
             generation_stats.append(
                 self._generation_summary(
@@ -184,6 +206,11 @@ class ExperimentLoopEngine:
                 continue
             seen.add(value)
             items.append({"sequence": value, "mutation_history": []})
+
+        seed_sequence = self._normalize_seed_sequence(seed_prompt, sequence_constraints)
+        if seed_sequence and seed_sequence not in seen:
+            seen.add(seed_sequence)
+            items.append({"sequence": seed_sequence, "mutation_history": ["seed_prompt_baseline"]})
 
         if len(items) < population_size and items:
             seed_sequences = [item["sequence"] for item in items]

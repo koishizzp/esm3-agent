@@ -39,6 +39,14 @@ class DummyExecutor:
         return {"structure": structure, **score}
 
 
+class EmptyGenerationExecutor(DummyExecutor):
+    def generate(self, prompt: str, num_candidates: int) -> list[str]:
+        return []
+
+    def mutate(self, sequence: str, num_mutations: int, num_candidates: int) -> list[str]:
+        return []
+
+
 class FirstLayerScoringTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tool = ProteinScoreTool(Settings())
@@ -219,6 +227,45 @@ class FirstLayerScoringTests(unittest.TestCase):
         self.assertEqual(record["sequence"][95], GFP_SCAFFOLD[95])
         self.assertTrue(record["metadata"]["motif_intact"])
         self.assertEqual(record["metadata"]["fixed_residue_violations"], [])
+
+    def test_workflow_uses_seed_sequence_as_baseline_when_generation_returns_empty(self) -> None:
+        engine = ExperimentLoopEngine(EmptyGenerationExecutor(), ExperimentMemory())
+        result = engine.run(
+            plan={
+                "workflow": "gfp_optimizer",
+                "target": "GFP",
+                "max_iterations": 1,
+                "patience": 1,
+                "candidates_per_round": 1,
+            },
+            task="optimize gfp brightness",
+            seed_prompt=GFP_SCAFFOLD,
+            initial_sequences=None,
+        )
+
+        self.assertEqual(len(result["records"]), 1)
+        self.assertEqual(result["records"][0]["sequence"], GFP_SCAFFOLD)
+        self.assertEqual(result["records"][0]["mutation_history"], ["seed_prompt_baseline"])
+
+    def test_workflow_raises_clear_error_when_no_initial_population_can_be_built(self) -> None:
+        engine = ExperimentLoopEngine(EmptyGenerationExecutor(), ExperimentMemory())
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "No candidate sequences were available for evaluation after initialization",
+        ):
+            engine.run(
+                plan={
+                    "workflow": "iterative_protein_optimization",
+                    "target": "target_protein",
+                    "max_iterations": 1,
+                    "patience": 1,
+                    "candidates_per_round": 1,
+                },
+                task="design a brighter protein",
+                seed_prompt="design a brighter protein",
+                initial_sequences=None,
+            )
 
     def test_request_specific_chromophore_start_allows_65_66_67_scheme(self) -> None:
         structure = {
