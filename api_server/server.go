@@ -58,7 +58,7 @@ func reasonerBaseURL() string {
 	if value := strings.TrimSpace(os.Getenv("PROTEIN_AGENT_API_URL")); value != "" {
 		return value
 	}
-	return "http://127.0.0.1:8000"
+	return "http://127.0.0.1:8002"
 }
 
 func (s *Server) Port() string { return s.port }
