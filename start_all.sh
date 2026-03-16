@@ -17,6 +17,7 @@ SERVER_PORT="${PROTEIN_AGENT_ESM3_SERVER_PORT:-8001}"
 API_HOST="${PROTEIN_AGENT_API_HOST:-0.0.0.0}"
 API_PORT="${PROTEIN_AGENT_API_PORT:-8000}"
 WAIT_TIMEOUT="${PROTEIN_AGENT_START_WAIT_TIMEOUT:-180}"
+STOP_TIMEOUT="${PROTEIN_AGENT_STOP_WAIT_TIMEOUT:-20}"
 ESM3_LOG="${PROTEIN_AGENT_ESM3_SERVER_LOG:-logs/esm3_server.log}"
 AGENT_LOG="${PROTEIN_AGENT_API_LOG:-logs/protein_agent.log}"
 ESM3_PID_FILE="${PROTEIN_AGENT_ESM3_SERVER_PID_FILE:-logs/esm3_server.pid}"
@@ -147,14 +148,112 @@ pid_owns_port() {
   return 1
 }
 
+command_matches_any_pattern() {
+  local command_line="$1"
+  shift || true
+
+  local pattern=""
+  for pattern in "$@"; do
+    [[ -n "$pattern" ]] || continue
+    if [[ "$command_line" == *"$pattern"* ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+stop_existing_pid() {
+  local name="$1"
+  local pid="$2"
+  local timeout="$3"
+
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Stopping existing $name process on port (PID: $pid)..."
+  kill "$pid" >/dev/null 2>&1 || true
+
+  for ((i=1; i<=timeout; i++)); do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Existing $name process did not exit within ${timeout}s; sending SIGKILL..."
+  kill -9 "$pid" >/dev/null 2>&1 || true
+  sleep 1
+
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    echo "ERROR: failed to stop existing $name process (PID: $pid)." >&2
+    return 1
+  fi
+
+  return 0
+}
+
+wait_for_port_release() {
+  local port="$1"
+  local timeout="$2"
+  local owners=""
+
+  for ((i=1; i<=timeout; i++)); do
+    owners="$(print_port_owners "$port")"
+    if [[ -z "$owners" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "ERROR: port $port did not become available after ${timeout}s." >&2
+  owners="$(print_port_owners "$port")"
+  if [[ -n "$owners" ]]; then
+    echo "$owners" >&2
+  fi
+  return 1
+}
+
 ensure_port_available() {
   local name="$1"
   local port="$2"
+  local pid_file="$3"
+  shift 3
   local owners=""
+  local matched_any=0
+  local has_unmatched=0
+  local pid=""
+  local cmd=""
+  local matching_pids=()
 
   owners="$(print_port_owners "$port")"
   if [[ -z "$owners" ]]; then
     return 0
+  fi
+
+  while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    cmd="$(describe_pid "$pid")"
+    if command_matches_any_pattern "$cmd" "$@"; then
+      matched_any=1
+      matching_pids+=("$pid")
+    else
+      has_unmatched=1
+    fi
+  done < <(listening_pids_on_port "$port")
+
+  if [[ "$matched_any" -eq 1 && "$has_unmatched" -eq 0 ]]; then
+    for pid in "${matching_pids[@]}"; do
+      if ! stop_existing_pid "$name" "$pid" "$STOP_TIMEOUT"; then
+        return 1
+      fi
+    done
+    rm -f "$pid_file"
+    if wait_for_port_release "$port" "$STOP_TIMEOUT"; then
+      return 0
+    fi
+    return 1
   fi
 
   echo "ERROR: cannot start $name because port $port is already in use." >&2
@@ -202,7 +301,11 @@ wait_for_service() {
 trap cleanup EXIT INT TERM
 
 echo "Starting local ESM3 service..."
-ensure_port_available "ESM3 service" "$SERVER_PORT"
+ensure_port_available \
+  "ESM3 service" \
+  "$SERVER_PORT" \
+  "$ESM3_PID_FILE" \
+  "uvicorn protein_agent.esm3_server.server:app"
 bash ./start_esm3_server.sh >"$ESM3_LOG" 2>&1 &
 ESM3_PID=$!
 echo "$ESM3_PID" >"$ESM3_PID_FILE"
@@ -214,7 +317,12 @@ if ! wait_for_service "ESM3 service" "http://127.0.0.1:${SERVER_PORT}/health" "$
 fi
 
 echo "Starting Protein Agent API..."
-ensure_port_available "Protein Agent API" "$API_PORT"
+ensure_port_available \
+  "Protein Agent API" \
+  "$API_PORT" \
+  "$AGENT_PID_FILE" \
+  "uvicorn protein_agent.api.main:app" \
+  "uvicorn api.main:app"
 bash ./start_agent.sh >"$AGENT_LOG" 2>&1 &
 AGENT_PID=$!
 echo "$AGENT_PID" >"$AGENT_PID_FILE"
